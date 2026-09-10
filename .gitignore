@@ -1,0 +1,14 @@
+tests/
+out/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.development
+.env.test
+.env.production
+release/
+node_modules/
+squashfs-root/
+docs
