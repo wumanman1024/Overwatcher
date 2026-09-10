@@ -12,3 +12,5 @@ release/
 node_modules/
 squashfs-root/
 docs
+.idea
+.vscode
