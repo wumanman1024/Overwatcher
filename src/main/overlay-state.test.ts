@@ -14,7 +14,7 @@ test('恢复的位置会被限制在显示器工作区内', () => {
 
 test('加速球展开时为详情面板预留窗口空间', () => {
   expect(sizeForOverlayMode('orb')).toEqual({ width: 164, height: 72 })
-  expect(sizeForOverlayMode('expanded')).toEqual({ width: 300, height: 290 })
+  expect(sizeForOverlayMode('expanded')).toEqual({ width: 280, height: 320 })
 })
 
 test('轻点加速球切换详情，拖动不切换', () => {

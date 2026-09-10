@@ -54,13 +54,14 @@ h1, h2, p { margin: 0; }
 
 .orb-face {
   position: relative;
+  z-index: 2;
   isolation: isolate;
   display: grid;
   place-items: center;
   width: 72px;
   height: 72px;
   padding: 0;
-  border: 1px solid rgba(86, 114, 205, 0.28);
+  border: 2px solid rgba(86, 114, 205, 0.42);
   border-radius: 50%;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.82) 0, rgba(247, 247, 252, 0.7) 58%, rgba(238, 240, 248, 0.74) 100%);
   backdrop-filter: blur(10px) saturate(135%);
@@ -174,21 +175,21 @@ h1, h2, p { margin: 0; }
 .orb-secondary small { margin-left: 2px; font-size: 7px; }
 .orb-network-strip {
   position: absolute;
-  z-index: 0;
+  z-index: 1;
   top: 13px;
-  left: 64px;
+  left: 60px;
   display: grid;
   align-content: center;
   gap: 2px;
-  width: 100px;
+  width: 104px;
   height: 46px;
-  padding: 5px 7px 5px 18px;
+  padding: 5px 7px 5px 22px;
   overflow: hidden;
   border: 1px solid rgba(86, 114, 205, 0.2);
   border-left: 0;
   border-radius: 13px;
   background: linear-gradient(110deg, rgba(240, 246, 255, 0.76), rgba(255, 255, 255, 0.68));
-  clip-path: path('M 0 0 H 87 Q 100 0 100 13 V 33 Q 100 46 87 46 H 0 C 5 39 8 31 8 23 C 8 15 5 7 0 0 Z');
+  clip-path: path('M 0 0 H 91 Q 104 0 104 13 V 33 Q 104 46 91 46 H 0 C 7 39 12 31 12 23 C 12 15 7 7 0 0 Z');
   backdrop-filter: blur(9px) saturate(130%);
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }
@@ -197,8 +198,8 @@ h1, h2, p { margin: 0; }
   content: '';
   position: absolute;
   top: 0;
-  left: -8px;
-  width: 16px;
+  left: -12px;
+  width: 24px;
   height: 46px;
   border-right: 1px solid rgba(86, 114, 205, 0.2);
   border-radius: 50%;
@@ -358,7 +359,7 @@ h1, h2, p { margin: 0; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 7px;
-  height: 130px;
+  height: 158px;
   margin-top: 7px;
 }
 
@@ -390,8 +391,8 @@ h1, h2, p { margin: 0; }
 .metric-meta { display: flex; align-items: center; justify-content: space-between; gap: 5px; min-height: 10px; margin-top: 2px; }
 .metric-detail { min-width: 0; overflow: hidden; color: var(--vp-text-3); font-size: 8px; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
 
-.disk-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; min-width: 0; min-height: 10px; margin-top: 2px; }
-.disk-rates { display: flex; min-width: 0; gap: 5px; overflow: hidden; }
+.disk-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px; min-width: 0; min-height: 20px; margin-top: 2px; }
+.disk-rates { display: grid; min-width: 0; gap: 2px; overflow: hidden; }
 .disk-rates > span { display: inline-flex; min-width: 0; align-items: baseline; color: var(--vp-text-2); font: 650 9px/1 "D-DIN", DDIN, "DIN Alternate", sans-serif; font-variant-numeric: tabular-nums lining-nums; white-space: nowrap; }
 .disk-rates i { margin-right: 2px; color: var(--vp-brand-2); font-size: 6px; font-style: normal; font-weight: 850; }
 .disk-rates > span + span i { color: var(--vp-warm); }
