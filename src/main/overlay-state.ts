@@ -4,6 +4,17 @@ export interface Position { x: number; y: number }
 export interface Size { width: number; height: number }
 export interface WorkArea extends Position, Size {}
 
+const orbSize: Size = { width: 164, height: 72 }
+const expandedSize: Size = { width: 300, height: 290 }
+
+export function sizeForOverlayMode(mode: OverlayMode): Size {
+  return mode === 'expanded' || mode === 'pinned' ? expandedSize : orbSize
+}
+
+export function shouldToggleOverlayOnPointerUp(start: Position, end: Position): boolean {
+  return Math.hypot(end.x - start.x, end.y - start.y) < 4
+}
+
 export function reduceOverlayMode(mode: OverlayMode, event: OverlayEvent): OverlayMode {
   if (event === 'dock') return 'docked'
   if (event === 'hover' && (mode === 'docked' || mode === 'orb')) return mode === 'docked' ? 'orb' : 'expanded'

@@ -1,20 +1,25 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, screen } from 'electron'
+// 托盘菜单功能暂时停用，恢复时一并取消此处和初始化块的注释。
+// import { Menu, Tray, nativeImage } from 'electron'
 import type { MetricSnapshot } from '../shared/metrics'
 import { join } from 'node:path'
 import { collectBaseMetrics } from './collectors/base'
 import { MetricSampler } from './collectors/sampler'
 import { collectNvidiaMetrics } from './collectors/nvidia'
 import { collectLinuxTemperature } from './collectors/linux-temperature'
-import { clickThroughLabel } from './tray-labels'
+import { collectPlatformTelemetry } from './collectors/platform-telemetry'
+// import { clickThroughLabel } from './tray-labels'
 import { placeAtRightCenter } from './window-placement'
-import { formatStatusText } from './status-text'
+// import { formatStatusText } from './status-text'
 import { loadOverlayPreferences, saveOverlayPreferences } from './overlay-store'
-import { clampPosition } from './overlay-state'
+import { clampPosition, sizeForOverlayMode } from './overlay-state'
+
+// Electron 官方支持的高性能 GPU 开关：多 GPU 设备优先使用独立显卡。
+app.commandLine.appendSwitch('force_high_performance_gpu')
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    width: 92,
-    height: 92,
+    ...sizeForOverlayMode('orb'),
     show: false,
     frame: false,
     transparent: true,
@@ -22,7 +27,8 @@ function createWindow(): BrowserWindow {
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: false
     }
   })
 
@@ -43,6 +49,7 @@ function createWindow(): BrowserWindow {
   return window
 }
 
+/* 底部状态栏窗口暂时停用。
 function createStatusWindow(): BrowserWindow {
   const workArea = screen.getPrimaryDisplay().workArea
   const window = new BrowserWindow({ width: 520, height: 28, x: workArea.x + Math.round((workArea.width - 520) / 2), y: workArea.y + workArea.height - 34, show: false, frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true, webPreferences: { preload: join(__dirname, '../preload/index.cjs'), contextIsolation: true, nodeIntegration: false } })
@@ -52,12 +59,13 @@ function createStatusWindow(): BrowserWindow {
   else void window.loadFile(join(__dirname, '../renderer/index.html'), { query: { surface: 'status' } })
   return window
 }
+*/
 
 app.whenReady().then(() => {
   let latestSnapshot: MetricSnapshot | undefined
   ipcMain.handle('monitor:get-snapshot', () => latestSnapshot)
   const window = createWindow()
-  const statusWindow = createStatusWindow()
+  // const statusWindow = createStatusWindow()
   ipcMain.on('monitor:move-overlay', (_event, position: unknown) => {
     if (!position || typeof position !== 'object') return
     const candidate = position as { x?: unknown; y?: unknown }
@@ -67,6 +75,15 @@ app.whenReady().then(() => {
     window.setPosition(next.x, next.y)
     saveOverlayPreferences({ ...loadOverlayPreferences(), position: next })
   })
+  ipcMain.on('monitor:set-overlay-expanded', (_event, expanded: unknown) => {
+    if (typeof expanded !== 'boolean') return
+    const nextSize = sizeForOverlayMode(expanded ? 'expanded' : 'orb')
+    const currentBounds = window.getBounds()
+    const workArea = screen.getDisplayMatching(currentBounds).workArea
+    const position = clampPosition({ x: currentBounds.x, y: currentBounds.y }, nextSize, workArea)
+    window.setBounds({ ...position, ...nextSize })
+  })
+  /* 托盘菜单功能暂时停用。
   let clickThrough = false
   const tray = new Tray(nativeImage.createEmpty())
   const updateTray = (): void => {
@@ -78,12 +95,13 @@ app.whenReady().then(() => {
     ]))
   }
   updateTray()
-  const sampler = new MetricSampler([collectBaseMetrics, collectNvidiaMetrics, collectLinuxTemperature])
+  */
+  const sampler = new MetricSampler([collectBaseMetrics, collectNvidiaMetrics, collectLinuxTemperature, collectPlatformTelemetry])
   const publish = async (): Promise<void> => {
     const snapshot = await sampler.collectOnce()
     latestSnapshot = snapshot
     window.webContents.send('monitor:snapshot', snapshot)
-    statusWindow.webContents.send('monitor:status', formatStatusText(snapshot))
+    // statusWindow.webContents.send('monitor:status', formatStatusText(snapshot))
     setTimeout(publish, 1000)
   }
   void publish()

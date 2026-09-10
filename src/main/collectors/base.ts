@@ -9,12 +9,16 @@ export function formatBytes(bytes: number): string {
 }
 
 export async function collectBaseMetrics(): Promise<CollectorResult> {
-  const [load, memory, disks, network, filesystems, cpu, temperature] = await Promise.all([
-    si.currentLoad(), si.mem(), si.disksIO(), si.networkStats(), si.fsSize(), si.cpu(), si.cpuTemperature()
+  const [load, memory, disks, network, filesystems, cpu, temperature, diskDevices] = await Promise.all([
+    si.currentLoad(), si.mem(), si.disksIO(), si.networkStats(), si.fsSize(), si.cpu(), si.cpuTemperature(), si.diskLayout().catch(() => [])
   ])
   const net = network[0]
   const diskSize = filesystems.reduce((total, filesystem) => total + filesystem.size, 0)
   const diskUsed = filesystems.reduce((total, filesystem) => total + filesystem.used, 0)
+  const diskTemperatures = diskDevices
+    .map((disk) => disk.temperature)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0)
+  const diskTemperature = diskTemperatures.length > 0 ? Math.round(Math.max(...diskTemperatures)) : undefined
   const cpuExtras = [
     { label: '频率', value: `${cpu.speed.toFixed(2)} GHz` },
     { label: '核心', value: `${cpu.cores} 核 / ${cpu.physicalCores} 线程` },
@@ -35,8 +39,9 @@ export async function collectBaseMetrics(): Promise<CollectorResult> {
       extras: [
         { label: '已用', value: diskUsed, unit: 'B' },
         { label: '总量', value: diskSize, unit: 'B' },
-        { label: '读取', value: disks.rIO_sec, unit: 'B/s' },
-        { label: '写入', value: disks.wIO_sec, unit: 'B/s' }
+        { label: '读取', value: disks.rIO_sec ?? 0, unit: 'B/s' },
+        { label: '写入', value: disks.wIO_sec ?? 0, unit: 'B/s' },
+        ...(diskTemperature !== undefined ? [{ label: '温度', value: diskTemperature, unit: '°C' }] : [])
       ]
     },
     network: net ? {

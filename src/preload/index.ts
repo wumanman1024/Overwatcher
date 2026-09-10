@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('hardwareMonitor', {
     return () => ipcRenderer.removeListener('monitor:snapshot', listener)
   },
   moveOverlay: (position: { x: number; y: number }) => ipcRenderer.send('monitor:move-overlay', position),
+  setOverlayExpanded: (expanded: boolean) => ipcRenderer.send('monitor:set-overlay-expanded', expanded),
   subscribeStatus: (callback: (text: string) => void) => {
     const listener = (_: Electron.IpcRendererEvent, text: string) => callback(text)
     ipcRenderer.on('monitor:status', listener)

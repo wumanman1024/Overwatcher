@@ -52,7 +52,9 @@ export class MetricSampler {
       memory: merged.memory ?? unavailable('暂时无法读取内存数据'),
       gpu: merged.gpu ?? unavailable('暂时无法读取 GPU 数据'),
       disk: merged.disk ?? unavailable('暂时无法读取磁盘数据'),
-      network: merged.network ?? unavailable('暂时无法读取网络数据')
+      network: merged.network ?? unavailable('暂时无法读取网络数据'),
+      display: merged.display ?? unavailable('暂时无法读取显示器刷新率'),
+      power: merged.power ?? unavailable('暂时无法读取充放电功率')
     }
   }
 }
