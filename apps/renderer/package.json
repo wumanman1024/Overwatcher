@@ -1,0 +1,10 @@
+{
+  "name": "@hardware-overlay/renderer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@hardware-overlay/shared": "workspace:*",
+    "vue": "^3.5.13"
+  }
+}
