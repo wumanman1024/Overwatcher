@@ -64,7 +64,6 @@ h1, h2, p { margin: 0; }
   border: 2px solid rgba(86, 114, 205, 0.42);
   border-radius: 50%;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.82) 0, rgba(247, 247, 252, 0.7) 58%, rgba(238, 240, 248, 0.74) 100%);
-  backdrop-filter: blur(10px) saturate(135%);
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
@@ -190,7 +189,6 @@ h1, h2, p { margin: 0; }
   border-radius: 13px;
   background: linear-gradient(110deg, rgba(240, 246, 255, 0.76), rgba(255, 255, 255, 0.68));
   clip-path: path('M 0 0 H 91 Q 104 0 104 13 V 33 Q 104 46 91 46 H 0 C 7 39 12 31 12 23 C 12 15 7 7 0 0 Z');
-  backdrop-filter: blur(9px) saturate(130%);
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
@@ -232,7 +230,6 @@ h1, h2, p { margin: 0; }
   border: 1px solid rgba(60, 60, 67, 0.12);
   border-radius: 18px;
   background: radial-gradient(circle at 100% 0, rgba(100, 108, 255, 0.12), transparent 34%), rgba(255, 255, 255, 0.97);
-  backdrop-filter: blur(18px) saturate(135%);
   cursor: default;
 }
 

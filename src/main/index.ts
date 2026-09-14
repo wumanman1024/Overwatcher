@@ -12,10 +12,7 @@ import { collectPlatformTelemetry } from './collectors/platform-telemetry'
 import { placeAtRightCenter } from './window-placement'
 // import { formatStatusText } from './status-text'
 import { loadOverlayPreferences, saveOverlayPreferences } from './overlay-store'
-import { clampPosition, sizeForOverlayMode } from './overlay-state'
-
-// Electron 官方支持的高性能 GPU 开关：多 GPU 设备优先使用独立显卡。
-app.commandLine.appendSwitch('force_high_performance_gpu')
+import { clampPosition, selectWorkAreaForPosition, sizeForOverlayMode } from './overlay-state'
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -71,7 +68,10 @@ app.whenReady().then(() => {
     const candidate = position as { x?: unknown; y?: unknown }
     if (typeof candidate.x !== 'number' || typeof candidate.y !== 'number') return
     const bounds = window.getBounds()
-    const next = clampPosition({ x: candidate.x, y: candidate.y }, bounds, screen.getDisplayMatching(bounds).workArea)
+    const requestedPosition = { x: candidate.x, y: candidate.y }
+    const workAreas = screen.getAllDisplays().map((display) => display.workArea)
+    const targetWorkArea = selectWorkAreaForPosition(requestedPosition, bounds, workAreas)
+    const next = clampPosition(requestedPosition, bounds, targetWorkArea)
     window.setPosition(next.x, next.y)
     saveOverlayPreferences({ ...loadOverlayPreferences(), position: next })
   })

@@ -30,3 +30,22 @@ export function clampPosition(position: Position, size: Size, workArea: WorkArea
     y: Math.min(Math.max(position.y, workArea.y), workArea.y + workArea.height - size.height)
   }
 }
+
+export function selectWorkAreaForPosition(position: Position, size: Size, workAreas: WorkArea[]): WorkArea {
+  const center = { x: position.x + size.width / 2, y: position.y + size.height / 2 }
+  const containing = workAreas.find((area) => (
+    center.x >= area.x && center.x <= area.x + area.width &&
+    center.y >= area.y && center.y <= area.y + area.height
+  ))
+  if (containing) return containing
+
+  return workAreas.reduce((closest, area) => {
+    const nearestX = Math.min(Math.max(center.x, area.x), area.x + area.width)
+    const nearestY = Math.min(Math.max(center.y, area.y), area.y + area.height)
+    const distance = (center.x - nearestX) ** 2 + (center.y - nearestY) ** 2
+    const closestNearestX = Math.min(Math.max(center.x, closest.x), closest.x + closest.width)
+    const closestNearestY = Math.min(Math.max(center.y, closest.y), closest.y + closest.height)
+    const closestDistance = (center.x - closestNearestX) ** 2 + (center.y - closestNearestY) ** 2
+    return distance < closestDistance ? area : closest
+  })
+}

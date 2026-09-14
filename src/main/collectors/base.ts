@@ -8,6 +8,10 @@ export function formatBytes(bytes: number): string {
   return `${Number((bytes / 1024 ** (index + 1)).toFixed(1))} ${units[index]}`
 }
 
+export function calculateMemoryUsage(memory: { total: number; available: number }): number {
+  return ((memory.total - memory.available) / memory.total) * 100
+}
+
 export async function collectBaseMetrics(): Promise<CollectorResult> {
   const [load, memory, disks, network, filesystems, cpu, temperature, diskDevices] = await Promise.all([
     si.currentLoad(), si.mem(), si.disksIO(), si.networkStats(), si.fsSize(), si.cpu(), si.cpuTemperature(), si.diskLayout().catch(() => [])
@@ -28,9 +32,9 @@ export async function collectBaseMetrics(): Promise<CollectorResult> {
     cpu: { available: true, value: load.currentLoad, unit: '%', extras: cpuExtras },
     memory: {
       available: true,
-      value: (memory.used / memory.total) * 100,
+      value: calculateMemoryUsage(memory),
       unit: '%',
-      extras: [{ label: '已用', value: memory.used, unit: 'B' }, { label: '总量', value: memory.total, unit: 'B' }]
+      extras: [{ label: '已用', value: memory.total - memory.available, unit: 'B' }, { label: '总量', value: memory.total, unit: 'B' }]
     },
     disk: {
       available: true,
