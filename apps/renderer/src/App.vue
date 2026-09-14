@@ -53,7 +53,6 @@ const stopDrag = (event: PointerEvent) => {
 const cancelDrag = () => { drag = undefined }
 const openPanel = () => { if (!isPanelSurface) window.hardwareMonitor.openPanel() }
 const closePanel = () => window.hardwareMonitor.closePanel()
-const openTrend = () => window.hardwareMonitor.openTrend()
 const activeMetric = computed(() => orbMetrics[activeMetricIndex.value % orbMetrics.length] ?? orbMetrics[0])
 const metricProgress = (metric: MetricValue) => Math.min(Math.max(metric.value ?? 0, 0), 100)
 const splitDisplay = (formatted: string) => {
@@ -114,7 +113,6 @@ const handlePointerLeave = () => { isRotationPaused.value = false }
           <p>CORE PULSE · LOCAL</p>
           <h1>监控中心</h1>
         </div>
-        <button class="trend-launch" type="button" @pointerdown.stop @click.stop="openTrend"><i aria-hidden="true">⌁</i>趋势分析</button>
         <button class="panel-close" type="button" aria-label="关闭面板" @pointerdown.stop @pointerup.stop @click.stop="closePanel">×</button>
       </header>
 

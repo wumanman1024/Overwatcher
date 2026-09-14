@@ -124,7 +124,8 @@ app.whenReady().then(() => {
   let latestSnapshot: MetricSnapshot | undefined
   let hardwareProfile: HardwareProfile | undefined
   let snapshotHistory: MetricSnapshot[] = []
-  void collectHardwareProfile().then((profile) => { hardwareProfile = profile }).catch((error) => console.error('[硬件监控] 读取硬件档案失败', error))
+  const desktopDisplays = screen.getAllDisplays().map((display) => ({ ...display.bounds, scaleFactor: display.scaleFactor }))
+  void collectHardwareProfile(desktopDisplays).then((profile) => { hardwareProfile = profile }).catch((error) => console.error('[硬件监控] 读取硬件档案失败', error))
   ipcMain.handle('monitor:get-snapshot', () => latestSnapshot)
   ipcMain.handle('monitor:get-history', () => snapshotHistory)
   const window = createOrbWindow()
@@ -191,7 +192,13 @@ app.whenReady().then(() => {
   const sampler = new MetricSampler([collectBaseMetrics, collectNvidiaMetrics, collectLinuxTemperature, collectPlatformTelemetry])
   const publish = async (): Promise<void> => {
     const metrics = await sampler.collectOnce()
-    const snapshot: MetricSnapshot = { ...metrics, ...(hardwareProfile ? { hardware: hardwareProfile } : {}) }
+    const displaySection = hardwareProfile?.sections.find((section) => section.key === 'display')
+    const mainDisplay = displaySection?.groups?.find((group) => group.status === '主屏') ?? displaySection?.groups?.[0]
+    const correctedResolution = mainDisplay?.fields.find((item) => item.label === '当前分辨率')?.value
+    const correctedMetrics = correctedResolution && metrics.display
+      ? { ...metrics, display: { ...metrics.display, detail: correctedResolution.replace(/\s/g, '') } }
+      : metrics
+    const snapshot: MetricSnapshot = { ...correctedMetrics, ...(hardwareProfile ? { hardware: hardwareProfile } : {}) }
     latestSnapshot = snapshot
     snapshotHistory = [...snapshotHistory, snapshot].slice(-60)
     window.webContents.send('monitor:snapshot', snapshot)

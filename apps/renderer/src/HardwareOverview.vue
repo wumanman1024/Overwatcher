@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import type { HardwareField, HardwareSection, MetricKey, MetricSnapshot, MetricValue } from '@hardware-overlay/shared/metrics'
 import { formatExtra, formatMetric } from './metric-display'
+import HardwareIcon from './HardwareIcon.vue'
 
 const props = defineProps<{ snapshot: MetricSnapshot }>()
 const activeKey = ref<HardwareSection['key']>('system')
@@ -45,6 +46,7 @@ const runtimeFields = computed<Record<HardwareSection['key'], HardwareField[]>>(
 }))
 
 const activeSection = computed(() => sections.value.find((item) => item.key === activeKey.value) ?? sections.value[0])
+const activeGroups = computed(() => activeSection.value?.groups ?? [])
 const visibleFields = computed(() => {
   const section = activeSection.value
   if (!section) return []
@@ -53,6 +55,14 @@ const visibleFields = computed(() => {
   for (const item of merged) if (!unique.has(`${item.label}:${item.value}`)) unique.set(`${item.label}:${item.value}`, item)
   return [...unique.values()]
 })
+const parameterCount = computed(() => visibleFields.value.length + activeGroups.value.reduce((total, group) => total + group.fields.length, 0))
+const statusTone = (status: string | undefined) => {
+  const normalized = status?.toLowerCase() ?? ''
+  if (['up', 'online', 'ok', 'good', '正常', '已连接', '主屏'].some((value) => normalized.includes(value))) return 'healthy'
+  if (['down', 'offline', 'failed', 'bad', 'error', '断开', '失败', '异常'].some((value) => normalized.includes(value))) return 'inactive'
+  return 'neutral'
+}
+const statusLabel = (status: string) => ({ up: '在线', down: '离线', unknown: '未知' })[status.toLowerCase()] ?? status
 
 const coreMetrics = computed(() => ([
   { key: 'cpu', label: 'CPU', metric: props.snapshot.cpu },
@@ -68,24 +78,38 @@ const coreMetrics = computed(() => ([
     <aside class="hardware-nav">
       <div class="machine-summary"><strong>{{ snapshot.hardware?.deviceName ?? '本机' }}</strong><span>{{ snapshot.hardware?.operatingSystem ?? '硬件检测中' }}</span></div>
       <button v-for="section in sections" :key="section.key" type="button" :class="{ active: activeKey === section.key }" @click="activeKey = section.key">
-        <i>{{ section.icon }}</i><span>{{ section.title }}</span><b>›</b>
+        <i><HardwareIcon :type="section.key" /></i><span>{{ section.title }}</span><b>›</b>
       </button>
     </aside>
 
     <div class="hardware-content">
       <div class="core-readings">
         <div v-for="item in coreMetrics" :key="item.key" :class="{ 'network-reading': item.key === 'network' }">
-          <span>{{ item.label }}</span>
+          <span class="reading-label"><HardwareIcon :type="item.key" />{{ item.label }}</span>
           <strong v-if="item.key !== 'network'">{{ formatMetric(item.metric) }}</strong>
           <strong v-else class="network-directions"><b>↓</b>{{ networkDown }}<i>↑</i>{{ networkUp }}</strong>
         </div>
       </div>
       <header class="hardware-section-title">
-        <div><i>{{ activeSection?.icon }}</i><span><strong>{{ activeSection?.title }}</strong><small>{{ activeSection?.summary }}</small></span></div>
-        <em>{{ visibleFields.length }} 项参数</em>
+        <div><i><HardwareIcon :type="activeSection?.key ?? 'system'" /></i><span><strong>{{ activeSection?.title }}</strong><small>{{ activeSection?.summary }}</small></span></div>
+        <em>{{ activeGroups.length ? `${activeGroups.length} 个设备 · ` : '' }}{{ parameterCount }} 项参数</em>
       </header>
-      <div class="parameter-grid">
-        <div v-for="item in visibleFields" :key="`${item.label}:${item.value}`" class="parameter-row"><span>{{ item.label }}</span><strong :title="item.value">{{ item.value }}</strong></div>
+      <div class="parameter-grid" :class="{ grouped: activeGroups.length }">
+        <div v-if="visibleFields.length" class="parameter-summary">
+          <div v-for="item in visibleFields" :key="`${item.label}:${item.value}`" class="parameter-row"><span>{{ item.label }}</span><strong :title="item.value">{{ item.value }}</strong></div>
+        </div>
+        <div v-if="activeGroups.length" class="device-groups">
+          <article v-for="(group, index) in activeGroups" :key="`${group.title}:${index}`" class="device-card" :class="group.status ? `status-${statusTone(group.status)}` : ''">
+            <header>
+              <span class="device-index"><HardwareIcon :type="activeSection?.key ?? 'system'" /><b>{{ index + 1 }}</b></span>
+              <div><strong :title="group.title">{{ group.title }}</strong><small :title="group.subtitle">{{ group.subtitle }}</small></div>
+              <em v-if="group.status" :class="statusTone(group.status)"><i></i>{{ statusLabel(group.status) }}</em>
+            </header>
+            <dl>
+              <div v-for="item in group.fields" :key="`${item.label}:${item.value}`" :class="{ 'network-address': activeSection?.key === 'network' && item.label === 'IPv4 地址' }"><dt>{{ item.label }}</dt><dd :title="item.value">{{ item.value }}</dd></div>
+            </dl>
+          </article>
+        </div>
       </div>
     </div>
   </section>

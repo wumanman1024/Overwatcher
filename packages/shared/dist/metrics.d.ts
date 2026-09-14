@@ -19,12 +19,19 @@ export interface HardwareField {
     label: string;
     value: string;
 }
+export interface HardwareGroup {
+    title: string;
+    subtitle?: string;
+    status?: string;
+    fields: HardwareField[];
+}
 export interface HardwareSection {
     key: 'system' | 'cpu' | 'board' | 'memory' | 'gpu' | 'storage' | 'display' | 'network';
     title: string;
     icon: string;
     summary: string;
     fields: HardwareField[];
+    groups?: HardwareGroup[];
 }
 export interface HardwareProfile {
     deviceName: string;
