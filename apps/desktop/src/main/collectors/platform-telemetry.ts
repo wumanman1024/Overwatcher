@@ -14,6 +14,18 @@ interface SlowTelemetry {
   ramTemperature?: number
 }
 
+export interface BatteryTelemetry {
+  hasBattery?: boolean
+  percent?: number
+  isCharging?: boolean
+  acConnected?: boolean
+  voltage?: number
+  amperage?: number
+  cycleCount?: number
+  designedCapacity?: number
+  maxCapacity?: number
+}
+
 let slowTelemetryCache: { expiresAt: number; value: SlowTelemetry } | undefined
 
 async function readNumber(path: string): Promise<number | undefined> {
@@ -152,6 +164,26 @@ async function readBatteryPower(): Promise<number | undefined> {
   return undefined
 }
 
+const finitePositive = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0
+
+export function buildBatteryMetric(battery: BatteryTelemetry, watts: number): CollectorResult['power'] {
+  const charging = battery.isCharging === true
+  const externalPower = battery.acConnected === true
+  const powerLabel = charging ? '充电功率' : '放电功率'
+  const detail = charging ? '充电' : externalPower ? '外接电源' : '放电'
+  const extras = [
+    ...(typeof battery.percent === 'number' ? [{ label: '电量', value: battery.percent, unit: '%' }] : []),
+    { label: powerLabel, value: watts, unit: 'W' },
+    ...(finitePositive(battery.voltage) ? [{ label: '电压', value: battery.voltage, unit: 'V' }] : []),
+    ...(finitePositive(battery.amperage) ? [{ label: '电流', value: battery.amperage, unit: 'A' }] : []),
+    ...(finitePositive(battery.designedCapacity) && finitePositive(battery.maxCapacity)
+      ? [{ label: '健康度', value: Math.round(battery.maxCapacity / battery.designedCapacity * 100), unit: '%' }]
+      : []),
+    ...(finitePositive(battery.cycleCount) ? [{ label: '循环次数', value: battery.cycleCount }] : [])
+  ]
+  return { available: true, value: watts, unit: 'W', detail, extras }
+}
+
 export async function collectPlatformTelemetry(): Promise<CollectorResult> {
   const [slow, battery, watts] = await Promise.all([
     getSlowTelemetry(),
@@ -164,13 +196,7 @@ export async function collectPlatformTelemetry(): Promise<CollectorResult> {
       ? { available: true, value: slow.refreshRate, unit: 'Hz', detail: slow.resolution }
       : { available: false, reason: '系统未提供显示器刷新率' },
     power: battery?.hasBattery && watts !== undefined
-      ? {
-          available: true,
-          value: watts,
-          unit: 'W',
-          detail: battery.isCharging ? '充电' : battery.acConnected ? '外接电源' : '放电',
-          extras: [{ label: '电量', value: battery.percent, unit: '%' }]
-        }
+      ? buildBatteryMetric(battery as BatteryTelemetry, watts)
       : { available: false, reason: '系统未提供电池功率' }
   }
 

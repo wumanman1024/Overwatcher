@@ -1,10 +1,13 @@
 const orbSize = { width: 164, height: 72 };
-const expandedSize = { width: 280, height: 320 };
+const expandedSize = { width: 860, height: 520 };
 export function sizeForOverlayMode(mode) {
     return mode === 'expanded' || mode === 'pinned' ? expandedSize : orbSize;
 }
 export function shouldToggleOverlayOnPointerUp(start, end) {
     return Math.hypot(end.x - start.x, end.y - start.y) < 4;
+}
+export function shouldOpenPanelOnPointerUp(start, end) {
+    return shouldToggleOverlayOnPointerUp(start, end);
 }
 export function reduceOverlayMode(mode, event) {
     if (event === 'dock')

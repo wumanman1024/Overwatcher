@@ -5,7 +5,7 @@ export interface Size { width: number; height: number }
 export interface WorkArea extends Position, Size {}
 
 const orbSize: Size = { width: 164, height: 72 }
-const expandedSize: Size = { width: 280, height: 320 }
+const expandedSize: Size = { width: 860, height: 520 }
 
 export function sizeForOverlayMode(mode: OverlayMode): Size {
   return mode === 'expanded' || mode === 'pinned' ? expandedSize : orbSize
@@ -13,6 +13,10 @@ export function sizeForOverlayMode(mode: OverlayMode): Size {
 
 export function shouldToggleOverlayOnPointerUp(start: Position, end: Position): boolean {
   return Math.hypot(end.x - start.x, end.y - start.y) < 4
+}
+
+export function shouldOpenPanelOnPointerUp(start: Position, end: Position): boolean {
+  return shouldToggleOverlayOnPointerUp(start, end)
 }
 
 export function reduceOverlayMode(mode: OverlayMode, event: OverlayEvent): OverlayMode {

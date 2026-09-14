@@ -1,6 +1,6 @@
-import type { MetricSnapshot, MetricValue } from '@hardware-overlay/shared/metrics'
+import type { MetricKey, MetricSnapshot, MetricValue } from '@hardware-overlay/shared/metrics'
 
-export type CollectorResult = Partial<Omit<MetricSnapshot, 'timestamp'>>
+export type CollectorResult = Partial<Record<MetricKey, MetricValue>>
 export type Collector = () => Promise<CollectorResult>
 
 const unavailable = (reason: string): MetricValue => ({ available: false, reason })

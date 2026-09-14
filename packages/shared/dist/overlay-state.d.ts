@@ -12,6 +12,7 @@ export interface WorkArea extends Position, Size {
 }
 export declare function sizeForOverlayMode(mode: OverlayMode): Size;
 export declare function shouldToggleOverlayOnPointerUp(start: Position, end: Position): boolean;
+export declare function shouldOpenPanelOnPointerUp(start: Position, end: Position): boolean;
 export declare function reduceOverlayMode(mode: OverlayMode, event: OverlayEvent): OverlayMode;
 export declare function clampPosition(position: Position, size: Size, workArea: WorkArea): Position;
 export declare function selectWorkAreaForPosition(position: Position, size: Size, workAreas: WorkArea[]): WorkArea;
