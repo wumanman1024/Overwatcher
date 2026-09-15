@@ -1,6 +1,9 @@
 {
   "name": "@localforge/desktop",
   "version": "0.1.0",
+  "author": {
+    "name": "wumanman"
+  },
   "private": true,
   "main": "./out/main/index.js",
   "type": "module",
@@ -48,8 +51,14 @@
       "package.json"
     ],
     "extraResources": [
-      "build/app-icon.png",
-      "build/tray-icon.png"
+      {
+        "from": "build/app-icon.png",
+        "to": "app-icon.png"
+      },
+      {
+        "from": "build/tray-icon.png",
+        "to": "tray-icon.png"
+      }
     ],
     "asar": true,
     "linux": {
@@ -61,9 +70,16 @@
       "maintainer": "Hardware Overlay <maintainer@example.invalid>"
     },
     "win": {
+      "signAndEditExecutable": false,
       "target": [
         "nsis"
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": true,
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": [

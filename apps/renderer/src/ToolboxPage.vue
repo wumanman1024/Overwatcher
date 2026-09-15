@@ -33,10 +33,10 @@ declare global {
   }
 }
 
-type ToolView = 'portal' | 'cleanup' | 'json' | 'data-lab' | 'ip-check' | 'network-diagnosis' | 'ports'
-type ToolCategory = 'all' | 'file' | 'data' | 'network'
+type ToolView = 'portal' | 'cleanup' | 'json' | 'data-lab' | 'color' | 'image' | 'ip-check' | 'network-diagnosis' | 'ports'
+type ToolCategory = 'all' | 'file' | 'data' | 'network' | 'design'
 const savedDefaultCategory = localStorage.getItem('localforge:default-category')
-const initialCategory: ToolCategory = savedDefaultCategory === 'file' || savedDefaultCategory === 'data' || savedDefaultCategory === 'network' ? savedDefaultCategory : 'all'
+const initialCategory: ToolCategory = savedDefaultCategory === 'file' || savedDefaultCategory === 'data' || savedDefaultCategory === 'network' || savedDefaultCategory === 'design' ? savedDefaultCategory : 'all'
 const savedIndent = Number(localStorage.getItem('localforge:json-indent'))
 const route = useRoute()
 const router = useRouter()
@@ -75,6 +75,13 @@ const listeningProcesses = ref<ListeningProcess[]>([])
 const portQuery = ref('')
 const portState = ref<'idle' | 'loading' | 'terminating' | 'error'>('idle')
 const portMessage = ref('查询当前 Windows 上正在监听的 TCP 端口。')
+const colorHex = ref('#16a34a')
+const colorMessage = ref('输入或选择颜色，即可获得不同格式的颜色值。')
+const imageInput = ref<HTMLInputElement>()
+const imagePreviewUrl = ref('')
+const imageFile = ref<File>()
+const imageInfo = ref<{ width: number; height: number }>()
+const imageMessage = ref('选择一张本地图片后，可预览并导出 PNG 或 JPEG。')
 
 const isBusy = computed(() => scanState.value !== 'idle')
 const allSelected = computed(() => targets.value.length > 0 && selectedIds.value.length === targets.value.length)
@@ -88,12 +95,15 @@ const categories: Array<{ id: ToolCategory; label: string }> = [
   { id: 'all', label: '全部工具' },
   { id: 'file', label: '文件工具' },
   { id: 'data', label: '数据工具' },
+  { id: 'design', label: '设计工具' },
   { id: 'network', label: '网络工具' }
 ]
 const portalTools: Array<{ id: Exclude<ToolView, 'portal'>; category: Exclude<ToolCategory, 'all'>; title: string; description: string; state: string }> = [
   { id: 'cleanup', category: 'file', title: '批量清理目录', description: '递归扫描并清理 node_modules 或指定名称的目录。', state: '文件工具' },
   { id: 'json', category: 'data', title: 'JSON 格式化', description: '格式化、压缩、键排序与本地校验。', state: '数据工具' },
   { id: 'data-lab', category: 'data', title: '开发数据转换台', description: 'Base64、URL、时间戳与 JWT 的本地转换和解析。', state: '数据工具' },
+  { id: 'color', category: 'design', title: '颜色转换器', description: '在 HEX、RGB 与 HSL 之间转换，并一键复制颜色值。', state: '设计工具' },
+  { id: 'image', category: 'design', title: '图片工具', description: '本地预览图片、查看尺寸与体积，并导出 PNG 或 JPEG。', state: '设计工具' },
   { id: 'ports', category: 'network', title: '端口与进程管理', description: '查看本机监听端口，并按需结束关联进程。', state: '网络工具' },
   { id: 'ip-check', category: 'network', title: 'IP 与代理检测', description: '检测当前出口公网 IP，确认代理或 VPN 是否实际生效。', state: '网络工具' },
   { id: 'network-diagnosis', category: 'network', title: '网络诊断', description: 'DNS 解析与 TCP 端口连通性检查。', state: '网络工具' }
@@ -118,10 +128,10 @@ const saveSettings = () => {
   settingsOpen.value = false
 }
 watch(() => route.name, (name) => {
-  activeTool.value = name === 'cleanup' || name === 'json' || name === 'data-lab' || name === 'ip-check' || name === 'network-diagnosis' || name === 'ports' ? name : 'portal'
+  activeTool.value = name === 'cleanup' || name === 'json' || name === 'data-lab' || name === 'color' || name === 'image' || name === 'ip-check' || name === 'network-diagnosis' || name === 'ports' ? name : 'portal'
 }, { immediate: true })
 watch(() => route.query.category, (category) => {
-  activeCategory.value = category === 'file' || category === 'data' || category === 'network' || category === 'all' ? category : initialCategory
+  activeCategory.value = category === 'file' || category === 'data' || category === 'network' || category === 'design' || category === 'all' ? category : initialCategory
 }, { immediate: true })
 void window.windowControls.isMaximized().then((value) => { isMaximized.value = value })
 
@@ -250,6 +260,72 @@ const copyDataResult = async () => {
   await navigator.clipboard.writeText(dataResult.value)
   dataMessage.value = '结果已复制到剪贴板。'
 }
+const normalizedHex = computed(() => {
+  const value = colorHex.value.trim().replace('#', '')
+  if (/^[\da-f]{3}$/i.test(value)) return `#${value.split('').map((part) => part + part).join('').toUpperCase()}`
+  return /^[\da-f]{6}$/i.test(value) ? `#${value.toUpperCase()}` : undefined
+})
+const colorRgb = computed(() => {
+  if (!normalizedHex.value) return undefined
+  const value = normalizedHex.value.slice(1)
+  return { r: Number.parseInt(value.slice(0, 2), 16), g: Number.parseInt(value.slice(2, 4), 16), b: Number.parseInt(value.slice(4, 6), 16) }
+})
+const colorHsl = computed(() => {
+  if (!colorRgb.value) return undefined
+  const { r, g, b } = colorRgb.value
+  const [red, green, blue] = [r, g, b].map((part) => part / 255)
+  const max = Math.max(red, green, blue)
+  const min = Math.min(red, green, blue)
+  const lightness = (max + min) / 2
+  const delta = max - min
+  if (!delta) return { h: 0, s: 0, l: Math.round(lightness * 100) }
+  const saturation = delta / (1 - Math.abs(2 * lightness - 1))
+  const hue = max === red ? ((green - blue) / delta) % 6 : max === green ? (blue - red) / delta + 2 : (red - green) / delta + 4
+  return { h: Math.round((hue * 60 + 360) % 360), s: Math.round(saturation * 100), l: Math.round(lightness * 100) }
+})
+const setHex = (value: string) => {
+  colorHex.value = value
+  colorMessage.value = /^#[\da-f]{3}([\da-f]{3})?$/i.test(value.trim()) ? '颜色已更新。' : '请输入 3 位或 6 位 HEX 颜色值。'
+}
+const copyColor = async (value: string) => {
+  await navigator.clipboard.writeText(value)
+  colorMessage.value = `已复制 ${value}`
+}
+const openImagePicker = () => imageInput.value?.click()
+const formatBytes = (bytes: number) => bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(bytes < 1024 ? 0 : 1)} KB` : `${(bytes / 1024 / 1024).toFixed(2)} MB`
+const loadImage = (file: File | undefined) => {
+  if (!file || !file.type.startsWith('image/')) {
+    imageMessage.value = '请选择 PNG、JPEG、WebP、GIF 等图片文件。'
+    return
+  }
+  if (imagePreviewUrl.value) URL.revokeObjectURL(imagePreviewUrl.value)
+  imageFile.value = file
+  imagePreviewUrl.value = URL.createObjectURL(file)
+  const image = new Image()
+  image.onload = () => {
+    imageInfo.value = { width: image.naturalWidth, height: image.naturalHeight }
+    imageMessage.value = '图片已加载，所有处理仅在本机完成。'
+  }
+  image.src = imagePreviewUrl.value
+}
+const onImageSelected = (event: Event) => loadImage((event.target as HTMLInputElement).files?.[0])
+const onImageDropped = (event: DragEvent) => loadImage(event.dataTransfer?.files[0])
+const exportImage = (mimeType: 'image/png' | 'image/jpeg') => {
+  if (!imagePreviewUrl.value || !imageFile.value || !imageInfo.value) return
+  const image = new Image()
+  image.onload = () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    canvas.getContext('2d')?.drawImage(image, 0, 0)
+    const link = document.createElement('a')
+    link.href = canvas.toDataURL(mimeType, mimeType === 'image/jpeg' ? 0.92 : undefined)
+    link.download = `${imageFile.value?.name.replace(/\.[^.]+$/, '') ?? 'image'}.${mimeType === 'image/png' ? 'png' : 'jpg'}`
+    link.click()
+    imageMessage.value = `已导出 ${mimeType === 'image/png' ? 'PNG' : 'JPEG'} 图片。`
+  }
+  image.src = imagePreviewUrl.value
+}
 const checkExitIp = async () => {
   if (!window.networkTools) {
     ipCheckState.value = 'error'
@@ -324,7 +400,7 @@ const terminateProcess = async (process: ListeningProcess) => {
       <aside class="toolbox-sidebar">
         <div class="toolbox-brand"><span>⌘</span><div><p>TOOLS</p><h1>工具分类</h1></div></div>
         <nav aria-label="工具列表">
-          <button v-for="category in categories" :key="category.id" :class="{ active: activeTool === 'portal' && activeCategory === category.id }" @click="showPortal(category.id)"><SvgIcon class="sidebar-icon" :name="category.id === 'all' ? 'dashboard' : category.id === 'file' ? 'folder' : category.id === 'data' ? 'code' : 'globe'" />{{ category.label }}</button>
+          <button v-for="category in categories" :key="category.id" :class="{ active: activeTool === 'portal' && activeCategory === category.id }" @click="showPortal(category.id)"><SvgIcon class="sidebar-icon" :name="category.id === 'all' ? 'dashboard' : category.id === 'file' ? 'folder' : category.id === 'data' ? 'code' : category.id === 'design' ? 'palette' : 'globe'" />{{ category.label }}</button>
         </nav>
         <div class="sidebar-actions">
           <button type="button" title="打开系统监控" aria-label="打开系统监控" @click="openMonitor"><SvgIcon name="monitor"/><span>系统监控</span></button>
@@ -338,7 +414,7 @@ const terminateProcess = async (process: ListeningProcess) => {
         <header class="toolbox-heading"><p>LOCALFORGE / TOOL PORTAL</p><h2>{{ portalTitle }}</h2><span>选择一项工具开始工作，所有处理均在本机完成。</span></header>
         <section class="portal-list" :aria-label="`${portalTitle}列表`">
           <button v-for="tool in visiblePortalTools" :key="tool.id" class="portal-item" type="button" @click="openTool(tool.id)">
-            <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'json' || tool.id === 'data-lab' ? 'code' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
+            <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'json' || tool.id === 'data-lab' ? 'code' : tool.id === 'color' ? 'palette' : tool.id === 'image' ? 'image' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
             <span class="portal-copy"><em>{{ tool.state }}</em><strong>{{ tool.title }}</strong><small>{{ tool.description }}</small></span>
             <b>›</b>
           </button>
@@ -377,6 +453,35 @@ const terminateProcess = async (process: ListeningProcess) => {
         <section class="json-actions data-actions"><label>转换方式 <select v-model="dataOperation"><option value="base64-encode">Base64 编码</option><option value="base64-decode">Base64 解码</option><option value="url-encode">URL 编码</option><option value="url-decode">URL 解码</option><option value="timestamp">解析时间戳</option><option value="jwt">解析 JWT</option></select></label><button class="primary" @click="runDataTransform(dataOperation)">执行转换</button><button :disabled="!dataResult" @click="copyDataResult">复制结果</button></section>
         <p class="tool-message">{{ dataMessage }}</p>
         <section class="json-editors"><label>输入<textarea v-model="dataSource" spellcheck="false" placeholder="粘贴文本、Base64、URL、时间戳或 JWT"></textarea></label><label>结果<textarea v-model="dataResult" spellcheck="false" readonly placeholder="转换结果会出现在这里"></textarea></label></section>
+      </template>
+
+      <template v-else-if="activeTool === 'color'">
+        <header class="toolbox-heading"><div><p>设计工具 / 颜色</p><h2>颜色转换器</h2><span>输入 HEX 颜色，快速获得 RGB 与 HSL 表示法。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="color-card">
+          <div class="color-preview" :style="{ background: normalizedHex ?? '#eef2ef' }"></div>
+          <label>HEX 颜色<input v-model="colorHex" maxlength="7" placeholder="#16A34A" @input="setHex(colorHex)"></label>
+          <input class="color-picker" type="color" :value="normalizedHex ?? '#16a34a'" aria-label="选择颜色" @input="setHex(($event.target as HTMLInputElement).value)">
+          <p class="tool-message" :class="{ error: !normalizedHex }">{{ colorMessage }}</p>
+        </section>
+        <section v-if="colorRgb && colorHsl && normalizedHex" class="color-values">
+          <button type="button" @click="copyColor(normalizedHex)"><small>HEX</small><strong>{{ normalizedHex }}</strong><span>点击复制</span></button>
+          <button type="button" @click="copyColor(`rgb(${colorRgb.r}, ${colorRgb.g}, ${colorRgb.b})`)"><small>RGB</small><strong>rgb({{ colorRgb.r }}, {{ colorRgb.g }}, {{ colorRgb.b }})</strong><span>点击复制</span></button>
+          <button type="button" @click="copyColor(`hsl(${colorHsl.h}, ${colorHsl.s}%, ${colorHsl.l}%)`)"><small>HSL</small><strong>hsl({{ colorHsl.h }}, {{ colorHsl.s }}%, {{ colorHsl.l }}%)</strong><span>点击复制</span></button>
+        </section>
+      </template>
+
+      <template v-else-if="activeTool === 'image'">
+        <header class="toolbox-heading"><div><p>设计工具 / 图片</p><h2>本地图片工具</h2><span>预览图片、查看尺寸和体积，并导出 PNG 或 JPEG。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <input ref="imageInput" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" @change="onImageSelected">
+        <section class="image-dropzone" :class="{ 'has-image': imagePreviewUrl }" @click="openImagePicker" @dragover.prevent @drop.prevent="onImageDropped">
+          <img v-if="imagePreviewUrl" :src="imagePreviewUrl" :alt="imageFile?.name ?? '图片预览'">
+          <div v-else><SvgIcon name="image" /><strong>选择或拖入图片</strong><span>支持 PNG、JPEG、WebP、GIF 与 BMP</span></div>
+        </section>
+        <p class="tool-message">{{ imageMessage }}</p>
+        <section v-if="imageFile && imageInfo" class="image-details">
+          <div><small>文件名称</small><strong>{{ imageFile.name }}</strong></div><div><small>像素尺寸</small><strong>{{ imageInfo.width }} × {{ imageInfo.height }}</strong></div><div><small>文件大小</small><strong>{{ formatBytes(imageFile.size) }}</strong></div>
+          <div class="image-actions"><button class="primary" @click="exportImage('image/png')">导出 PNG</button><button @click="exportImage('image/jpeg')">导出 JPEG</button></div>
+        </section>
       </template>
 
       <template v-else-if="activeTool === 'ports'">

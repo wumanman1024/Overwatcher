@@ -3,8 +3,7 @@
   "version": "0.1.0",
   "description": "本地开发者工具箱，包含硬件监控与常用效率工具",
   "author": {
-    "name": "Hardware Overlay",
-    "email": "maintainer@example.invalid"
+    "name": "wumanman"
   },
   "homepage": "https://example.invalid/localforge",
   "private": true,
