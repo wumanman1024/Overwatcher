@@ -12,6 +12,7 @@ interface SlowTelemetry {
   refreshRate?: number
   resolution?: string
   ramTemperature?: number
+  fanSpeeds?: number[]
 }
 
 export interface BatteryTelemetry {
@@ -83,6 +84,48 @@ async function readRamTemperature(): Promise<number | undefined> {
   return undefined
 }
 
+async function readLinuxFanSpeeds(): Promise<number[]> {
+  try {
+    const speeds: number[] = []
+    const directories = await readdir('/sys/class/hwmon', { withFileTypes: true })
+    for (const directory of directories.filter((entry) => entry.isDirectory())) {
+      const root = join('/sys/class/hwmon', directory.name)
+      const files = await readdir(root)
+      for (const fanFile of files.filter((name) => /^fan\d+_input$/.test(name))) {
+        const value = await readNumber(join(root, fanFile))
+        if (value !== undefined && value > 0) speeds.push(Math.round(value))
+      }
+    }
+    return speeds
+  } catch {
+    return []
+  }
+}
+
+async function readWindowsFanSpeeds(): Promise<number[]> {
+  const script = [
+    "$namespaces = @('root/LibreHardwareMonitor', 'root/OpenHardwareMonitor')",
+    '$values = foreach ($namespace in $namespaces) {',
+    '  try { Get-CimInstance -Namespace $namespace -ClassName Sensor -ErrorAction Stop |',
+    "    Where-Object { $_.SensorType -eq 'Fan' -and $_.Value -gt 0 } |",
+    '    Select-Object -ExpandProperty Value } catch {}',
+    '}',
+    '$values | Sort-Object -Descending | Select-Object -First 4'
+  ].join('\n')
+  try {
+    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout: 2200, windowsHide: true })
+    return String(stdout).split(/\r?\n/).map(Number).filter((value) => Number.isFinite(value) && value > 0).map((value) => Math.round(value))
+  } catch {
+    return []
+  }
+}
+
+async function readFanSpeeds(): Promise<number[]> {
+  if (process.platform === 'linux') return readLinuxFanSpeeds()
+  if (process.platform === 'win32') return readWindowsFanSpeeds()
+  return []
+}
+
 async function readDisplay(): Promise<Pick<SlowTelemetry, 'refreshRate' | 'resolution'>> {
   try {
     const graphics = await si.graphics()
@@ -101,8 +144,8 @@ async function readDisplay(): Promise<Pick<SlowTelemetry, 'refreshRate' | 'resol
 
 async function getSlowTelemetry(): Promise<SlowTelemetry> {
   if (slowTelemetryCache && slowTelemetryCache.expiresAt > Date.now()) return slowTelemetryCache.value
-  const [display, ramTemperature] = await Promise.all([readDisplay(), readRamTemperature()])
-  const value = { ...display, ...(ramTemperature !== undefined ? { ramTemperature } : {}) }
+  const [display, ramTemperature, fanSpeeds] = await Promise.all([readDisplay(), readRamTemperature(), readFanSpeeds()])
+  const value = { ...display, ...(ramTemperature !== undefined ? { ramTemperature } : {}), ...(fanSpeeds.length > 0 ? { fanSpeeds } : {}) }
   slowTelemetryCache = { expiresAt: Date.now() + 10_000, value }
   return value
 }
@@ -202,6 +245,9 @@ export async function collectPlatformTelemetry(): Promise<CollectorResult> {
 
   if (slow.ramTemperature !== undefined) {
     result.memory = { available: true, extras: [{ label: '温度', value: slow.ramTemperature, unit: '°C' }] }
+  }
+  if (slow.fanSpeeds?.length) {
+    result.cpu = { available: true, extras: slow.fanSpeeds.map((value, index) => ({ label: `风扇 ${index + 1}`, value, unit: 'RPM' })) }
   }
   return result
 }

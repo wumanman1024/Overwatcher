@@ -135,6 +135,8 @@ function createOrbWindow(): BrowserWindow {
 function createPanelWindow(): BrowserWindow {
   const window = new BrowserWindow({
     ...sizeForOverlayMode('expanded'),
+    minWidth: 860,
+    minHeight: 620,
     show: false,
     frame: false,
     transparent: true,

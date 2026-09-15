@@ -34,6 +34,7 @@ const field = (label: string, value: unknown, suffix = ''): HardwareField | unde
 const fields = (...items: Array<HardwareField | undefined>): HardwareField[] => items.filter((item): item is HardwareField => Boolean(item))
 const bytes = (value: unknown): string | undefined => typeof value === 'number' && value > 0 ? formatBytes(value) : undefined
 const ghz = (value: unknown): string | undefined => typeof value === 'number' && value > 0 ? `${value.toFixed(2)} GHz` : undefined
+const isOfflineNetwork = (operstate: string | undefined): boolean => ['down', 'offline'].includes(operstate?.toLowerCase() ?? '')
 
 const collectWindowsNativeDisplayModes = async (): Promise<NativeDisplayMode[]> => {
   if (process.platform !== 'win32') return []
@@ -58,6 +59,7 @@ export async function collectHardwareProfile(desktopDisplays: DesktopDisplayMetr
   const gpuModels = graphics.controllers.map((item) => item.model).filter(Boolean)
   const diskModels = disks.map((item) => item.name || item.device).filter(Boolean)
   const mainDisplay = graphics.displays.find((item) => item.main) ?? graphics.displays[0]
+  const orderedNetworks = [...networks].sort((left, right) => Number(isOfflineNetwork(left.operstate)) - Number(isOfflineNetwork(right.operstate)))
 
   const sections: HardwareSection[] = [
     {
@@ -134,7 +136,7 @@ export async function collectHardwareProfile(desktopDisplays: DesktopDisplayMetr
     {
       key: 'network', title: '网卡', icon: 'NET', summary: `${networks.length} 个网络接口`,
       fields: [],
-      groups: networks.map((item, index) => ({
+      groups: orderedNetworks.map((item, index) => ({
         title: item.ifaceName || item.iface || `接口 ${index + 1}`,
         subtitle: [`IPv4 · ${item.ip4 || '未分配'}`, item.type, item.virtual ? '虚拟接口' : undefined].filter(Boolean).join('  ·  '),
         status: item.operstate || '未知',

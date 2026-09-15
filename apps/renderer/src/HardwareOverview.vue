@@ -31,8 +31,17 @@ const extraDisplay = (metric: MetricValue | undefined, label: string): string =>
 }
 const networkDown = computed(() => extraDisplay(props.snapshot.network, '下载'))
 const networkUp = computed(() => extraDisplay(props.snapshot.network, '上传'))
+const powerFields = computed<HardwareField[]>(() => {
+  const power = props.snapshot.power
+  if (!power?.available) return [{ label: '充放电功率', value: '系统未提供' }]
+  return [
+    { label: `${power.detail ?? '当前'}功率`, value: formatMetric(power) },
+    ...extras(power).filter((item) => !item.label.includes('功率'))
+  ]
+})
+const fanFields = computed<HardwareField[]>(() => extras(props.snapshot.cpu).filter((item) => item.label.startsWith('风扇')))
 const runtimeFields = computed<Record<HardwareSection['key'], HardwareField[]>>(() => ({
-  system: [{ label: '设备名称', value: props.snapshot.hardware?.deviceName ?? '本机' }, { label: '操作系统', value: props.snapshot.hardware?.operatingSystem ?? '正在读取…' }],
+  system: [{ label: '设备名称', value: props.snapshot.hardware?.deviceName ?? '本机' }, { label: '操作系统', value: props.snapshot.hardware?.operatingSystem ?? '正在读取…' }, ...powerFields.value, ...fanFields.value],
   cpu: [metricField('当前占用', props.snapshot.cpu), ...extras(props.snapshot.cpu)].filter((item): item is HardwareField => Boolean(item)),
   board: [],
   memory: [metricField('当前占用', props.snapshot.memory), ...extras(props.snapshot.memory)].filter((item): item is HardwareField => Boolean(item)),
@@ -73,6 +82,10 @@ const coreMetrics = computed(() => ([
   { key: 'network', label: '网络', metric: props.snapshot.network }
 ] satisfies Array<{ key: MetricKey; label: string; metric: MetricValue }>))
 const coreMetricHealth = (key: MetricKey, metric: MetricValue) => metricHealth(key, metric)
+const coreMetricTemperature = (metric: MetricValue): string | undefined => {
+  const temperature = metric.extras?.find((item) => item.label.includes('温度'))
+  return temperature ? formatExtra(temperature.value, temperature.unit) : undefined
+}
 </script>
 
 <template>
@@ -88,8 +101,8 @@ const coreMetricHealth = (key: MetricKey, metric: MetricValue) => metricHealth(k
       <div class="core-readings">
         <div v-for="item in coreMetrics" :key="item.key" :class="[{ 'network-reading': item.key === 'network' }, `status-${coreMetricHealth(item.key, item.metric)}`]">
           <span class="reading-label"><HardwareIcon :type="item.key" />{{ item.label }}<em v-if="item.key !== 'network'" class="reading-status">{{ metricHealthLabel[coreMetricHealth(item.key, item.metric)] }}</em></span>
-          <strong v-if="item.key !== 'network'">{{ formatMetric(item.metric) }}</strong>
-          <strong v-else class="network-directions"><b>↓</b>{{ networkDown }}<i>↑</i>{{ networkUp }}</strong>
+          <strong v-if="item.key !== 'network'" class="reading-value"><span>{{ formatMetric(item.metric) }}</span><small class="reading-temperature">温 {{ coreMetricTemperature(item.metric) ?? '—' }}</small></strong>
+          <strong v-else class="network-directions"><span><b>↓</b><em :title="networkDown">{{ networkDown }}</em></span><span><i>↑</i><em :title="networkUp">{{ networkUp }}</em></span></strong>
         </div>
       </div>
       <header class="hardware-section-title">
