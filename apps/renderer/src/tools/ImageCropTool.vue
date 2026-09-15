@@ -2,4 +2,4 @@
 import ToolboxPage from '../ToolboxPage.vue'
 </script>
 
-<template><ToolboxPage tool="image-compress" /></template>
+<template><ToolboxPage tool="image-crop" /></template>

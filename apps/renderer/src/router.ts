@@ -11,6 +11,9 @@ import DiffTool from './tools/DiffTool.vue'
 import ConvertTool from './tools/ConvertTool.vue'
 import ColorTool from './tools/ColorTool.vue'
 import ImageTool from './tools/ImageTool.vue'
+import ImageCropTool from './tools/ImageCropTool.vue'
+import BackgroundRemoveTool from './tools/BackgroundRemoveTool.vue'
+import ScreenColorTool from './tools/ScreenColorTool.vue'
 import QrcodeTool from './tools/QrcodeTool.vue'
 import PortsTool from './tools/PortsTool.vue'
 import IpCheckTool from './tools/IpCheckTool.vue'
@@ -33,7 +36,10 @@ export const router = createRouter({
     { path: '/diff', name: 'diff', component: DiffTool },
     { path: '/convert', name: 'convert', component: ConvertTool },
     { path: '/color', name: 'color', component: ColorTool },
-    { path: '/image', name: 'image', component: ImageTool },
+    { path: '/image', name: 'image-compress', component: ImageTool },
+    { path: '/image-crop', name: 'image-crop', component: ImageCropTool },
+    { path: '/background-remove', name: 'background-remove', component: BackgroundRemoveTool },
+    { path: '/screen-color', name: 'screen-color', component: ScreenColorTool },
     { path: '/qrcode', name: 'qrcode', component: QrcodeTool },
     { path: '/ports', name: 'ports', component: PortsTool },
     { path: '/ip-check', name: 'ip-check', component: IpCheckTool },

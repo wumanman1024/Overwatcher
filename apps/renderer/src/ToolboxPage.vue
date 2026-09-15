@@ -71,7 +71,7 @@ declare global {
   }
 }
 
-type ToolView = 'portal' | 'cleanup' | 'json' | 'data-lab' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'ports' | 'volta' | 'nvm' | 'assistant-prompt'
+type ToolView = 'portal' | 'cleanup' | 'json' | 'data-lab' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image-compress' | 'image-crop' | 'background-remove' | 'screen-color' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'ports' | 'volta' | 'nvm' | 'assistant-prompt'
 type ToolCategory = 'all' | 'file' | 'data' | 'network' | 'design'
 const props = defineProps<{ tool: ToolView }>()
 const savedDefaultCategory = localStorage.getItem('localforge:default-category')
@@ -232,7 +232,10 @@ const portalTools: Array<{ id: Exclude<ToolView, 'portal'>; category: Exclude<To
   { id: 'diff', category: 'data', title: '文本差异对比', description: '逐行比较两段文本，快速查看新增、删除和未变内容。', state: '数据工具' },
   { id: 'convert', category: 'data', title: '配置格式转换', description: '在 JSON、YAML、TOML 与 XML 之间本地转换。', state: '数据工具' },
   { id: 'color', category: 'design', title: '颜色转换器', description: '在 HEX、RGB 与 HSL 之间转换，并一键复制颜色值。', state: '设计工具' },
-  { id: 'image', category: 'design', title: 'TinyPNG 图片压缩', description: '在本地压缩 PNG、JPG 与 WebP，并直观看到节省的文件体积。', state: '设计工具' },
+  { id: 'image-compress', category: 'design', title: 'TinyPNG 图片压缩', description: '批量压缩图片、统一转换格式并导出至新文件夹。', state: '设计工具' },
+  { id: 'image-crop', category: 'design', title: '图片裁剪', description: '按像素精确裁剪本地图片，并下载裁剪结果。', state: '设计工具' },
+  { id: 'background-remove', category: 'design', title: '背景透明化', description: '根据四角颜色移除纯色或近似纯色背景。', state: '设计工具' },
+  { id: 'screen-color', category: 'design', title: '屏幕取色', description: '从屏幕任意位置吸取颜色并复制 HEX 值。', state: '设计工具' },
   { id: 'qrcode', category: 'design', title: '二维码工具', description: '在本地生成二维码，并识别图片中的二维码内容。', state: '设计工具' },
   { id: 'ports', category: 'network', title: '端口与进程管理', description: '查看本机监听端口，并按需结束关联进程。', state: '网络工具' },
   { id: 'ip-check', category: 'network', title: 'IP 与代理检测', description: '检测当前出口公网 IP，确认代理或 VPN 是否实际生效。', state: '网络工具' },
@@ -771,7 +774,7 @@ const onImageSelected = (event: Event) => {
 const onImageDropped = (event: DragEvent) => {
   const files = event.dataTransfer?.files
   if (!files?.length) return
-  if (files.length > 1) loadImageBatch(files)
+  if (files.length > 1 && activeTool.value === 'image-compress') loadImageBatch(files)
   else loadImage(files[0])
 }
 const loadImageBatch = (files: FileList | File[]) => {
@@ -896,6 +899,7 @@ const removeBackground = async () => {
       if (distance <= threshold) data[index + 3] = 0
     }
     context.putImageData(pixels, 0, 0)
+    imageOutputType.value = 'image/png'
     updatePreviewFromCanvas(canvas, '已按图片四角的背景色生成透明区域；复杂背景建议调高容差后重试。')
   } catch (error) { imageMessage.value = error instanceof Error ? error.message : String(error) } finally { imageProcessing.value = false }
 }
@@ -918,7 +922,7 @@ const sampleImageColor = async (event: MouseEvent) => {
 const pickScreenColor = async () => {
   try {
     const EyeDropper = (window as Window & { EyeDropper?: new () => { open(): Promise<{ sRGBHex: string }> } }).EyeDropper
-    if (!EyeDropper) throw new Error('当前 Electron 版本不支持屏幕取色，请点击图片取色。')
+    if (!EyeDropper) throw new Error('当前 Electron 版本不支持系统屏幕取色。')
     imageSampleColor.value = (await new EyeDropper().open()).sRGBHex.toUpperCase()
     await navigator.clipboard.writeText(imageSampleColor.value)
     imageMessage.value = `已吸附并复制 ${imageSampleColor.value}。`
@@ -1313,24 +1317,21 @@ void refreshNodeReleases()
         </section>
       </template>
 
-      <template v-else-if="activeTool === 'image'">
-        <header class="toolbox-heading"><div><p>设计工具 / TINYPNG STYLE</p><h2>TinyPNG 图片压缩</h2><span>压缩、裁剪和转换图片；图片始终留在本机，不会上传到任何服务器。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+      <template v-else-if="activeTool === 'image-compress'">
+        <header class="toolbox-heading"><div><p>设计工具 / TINYPNG STYLE</p><h2>TinyPNG 图片压缩</h2><span>批量压缩、转换格式并导出至新文件夹；图片始终留在本机。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
         <input ref="imageInput" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml" @change="onImageSelected">
         <input ref="imageBatchInput" class="visually-hidden" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml" @change="onImageBatchSelected">
         <input ref="imageFolderInput" class="visually-hidden" type="file" webkitdirectory directory multiple accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml" @change="onImageFolderSelected">
         <section class="batch-import-card"><div><small>BATCH COMPRESS</small><strong>批量压缩并导出文件夹</strong><span>中文文件名会自动改为英文安全名，例如 <code>image-001.webp</code>。</span></div><button type="button" @click="imageBatchInput?.click()">选择多张图片</button><button class="primary" type="button" @click="imageFolderInput?.click()">选择图片文件夹</button></section>
         <section class="image-dropzone" :class="{ 'has-image': imagePreviewUrl }" @click="openImagePicker" @dragover.prevent @drop.prevent="onImageDropped">
-          <img v-if="imagePreviewUrl" :src="imagePreviewUrl" :alt="imageFile?.name ?? '图片预览'" title="点击图片吸附颜色" @click.stop="sampleImageColor">
+          <img v-if="imagePreviewUrl" :src="imagePreviewUrl" :alt="imageFile?.name ?? '图片预览'">
           <div v-else><SvgIcon name="image" /><strong>拖入图片开始压缩</strong><span>支持 PNG、JPEG、WebP、GIF、BMP 与 SVG · 单次处理一张</span></div>
         </section>
         <p class="tool-message">{{ imageMessage }}</p>
         <section v-if="imageFile && imageInfo" class="image-details">
           <div><small>文件名称</small><strong>{{ imageFile.name }}</strong></div><div><small>像素尺寸</small><strong>{{ imageInfo.width }} × {{ imageInfo.height }}</strong></div><div><small>文件大小</small><strong>{{ formatBytes(imageFile.size) }}</strong></div>
-          <div class="image-actions"><button @click.stop="pickScreenColor">{{ eyeDropperSupported ? '屏幕取色' : '图片取色' }}</button><button v-if="imageSampleColor" class="color-chip" :style="{ background: imageSampleColor }" :title="imageSampleColor">{{ imageSampleColor }}</button></div>
         </section>
         <section v-if="imageFile && imageInfo" class="image-workbench">
-          <div><h3>裁剪</h3><p>按像素设定裁剪区域，点击应用后将以裁剪结果继续编辑。</p><label>X <input v-model.number="imageCrop.x" type="number" min="0" :max="Math.max(0, imageInfo.width - 1)"></label><label>Y <input v-model.number="imageCrop.y" type="number" min="0" :max="Math.max(0, imageInfo.height - 1)"></label><label>宽 <input v-model.number="imageCrop.width" type="number" min="1" :max="imageInfo.width - imageCrop.x"></label><label>高 <input v-model.number="imageCrop.height" type="number" min="1" :max="imageInfo.height - imageCrop.y"></label><button @click="applyCrop">应用裁剪</button></div>
-          <div><h3>背景透明化</h3><p>根据图片四角颜色移除接近的背景，适合白底、纯色背景。</p><label>容差 <input v-model.number="backgroundTolerance" type="range" min="8" max="100"><output>{{ backgroundTolerance }}</output></label><button :disabled="imageProcessing" @click="removeBackground">{{ imageProcessing ? '处理中…' : '去除背景' }}</button></div>
           <div><h3>压缩与格式</h3><p>批量导出会统一使用以下参数。降低质量或尺寸比例可显著减小体积；SVG 为嵌入图片，并非矢量化。</p><label>格式 <select v-model="imageOutputType" @change="clearCompressedImage"><option value="original">保持原格式</option><option value="image/png">统一 PNG</option><option value="image/jpeg">统一 JPG</option><option value="image/webp">统一 WebP（推荐）</option><option value="image/svg+xml">统一 SVG（嵌入图片）</option></select></label><label>清晰度（JPG/WebP） <input v-model.number="imageQuality" type="range" min="20" max="100" :disabled="imageOutputType === 'image/png' || imageOutputType === 'image/svg+xml'"><output>{{ imageQuality }}%</output></label><label>尺寸比例 <input v-model.number="imageScale" type="range" min="10" max="100" step="5" @change="clearCompressedImage"><output>{{ imageScale }}%</output></label><button class="primary" :disabled="imageCompressing" @click="compressImage">{{ imageCompressing ? '压缩中…' : '开始压缩' }}</button></div>
         </section>
         <section v-if="imageBatch.length" class="batch-queue">
@@ -1341,6 +1342,25 @@ void refreshNodeReleases()
         <section v-if="compressedImage && imageFile" class="compression-result">
           <div><small>原始文件</small><strong>{{ formatBytes(imageFile.size) }}</strong></div><i aria-hidden="true">→</i><div><small>压缩结果</small><strong>{{ formatBytes(compressedImage.blob.size) }}</strong></div><div><small>空间变化</small><strong :class="{ 'file-larger': compressedImage.blob.size > imageFile.size }">{{ compressedImage.blob.size <= imageFile.size ? `节省 ${Math.round((1 - compressedImage.blob.size / imageFile.size) * 100)}%` : `增加 ${Math.round((compressedImage.blob.size / imageFile.size - 1) * 100)}%` }}</strong></div><button class="primary" @click="downloadCompressedImage">下载图片</button>
         </section>
+      </template>
+
+      <template v-else-if="activeTool === 'image-crop'">
+        <header class="toolbox-heading"><div><p>设计工具 / CROP</p><h2>图片裁剪</h2><span>按像素精确裁剪本地图片，裁剪后可直接下载结果。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <input ref="imageInput" class="visually-hidden" type="file" accept="image/*" @change="onImageSelected"><section class="image-dropzone" :class="{ 'has-image': imagePreviewUrl }" @click="openImagePicker" @dragover.prevent @drop.prevent="onImageDropped"><img v-if="imagePreviewUrl" :src="imagePreviewUrl" :alt="imageFile?.name ?? '图片预览'"><div v-else><SvgIcon name="image" /><strong>选择或拖入图片</strong><span>支持常见图片格式</span></div></section><p class="tool-message">{{ imageMessage }}</p>
+        <section v-if="imageFile && imageInfo" class="image-workbench single-image-tool"><div><h3>裁剪区域</h3><p>设置裁剪区域后先应用，再下载处理结果。</p><label>X <input v-model.number="imageCrop.x" type="number" min="0" :max="Math.max(0, imageInfo.width - 1)"></label><label>Y <input v-model.number="imageCrop.y" type="number" min="0" :max="Math.max(0, imageInfo.height - 1)"></label><label>宽 <input v-model.number="imageCrop.width" type="number" min="1" :max="imageInfo.width - imageCrop.x"></label><label>高 <input v-model.number="imageCrop.height" type="number" min="1" :max="imageInfo.height - imageCrop.y"></label><button class="primary" @click="applyCrop">应用裁剪</button><button @click="compressImage">生成下载文件</button></div></section>
+        <section v-if="compressedImage && imageFile" class="compression-result"><div><small>裁剪结果</small><strong>{{ formatBytes(compressedImage.blob.size) }}</strong></div><button class="primary" @click="downloadCompressedImage">下载图片</button></section>
+      </template>
+
+      <template v-else-if="activeTool === 'background-remove'">
+        <header class="toolbox-heading"><div><p>设计工具 / TRANSPARENT BACKGROUND</p><h2>背景透明化</h2><span>基于图片四角的颜色移除接近的纯色背景，适合商品图和证件照。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <input ref="imageInput" class="visually-hidden" type="file" accept="image/*" @change="onImageSelected"><section class="image-dropzone" :class="{ 'has-image': imagePreviewUrl }" @click="openImagePicker" @dragover.prevent @drop.prevent="onImageDropped"><img v-if="imagePreviewUrl" :src="imagePreviewUrl" :alt="imageFile?.name ?? '图片预览'"><div v-else><SvgIcon name="image" /><strong>选择或拖入图片</strong><span>建议使用纯色背景图片</span></div></section><p class="tool-message">{{ imageMessage }}</p>
+        <section v-if="imageFile && imageInfo" class="image-workbench single-image-tool"><div><h3>去除背景</h3><p>根据四角颜色生成透明区域；复杂背景建议多次调整容差。</p><label>容差 <input v-model.number="backgroundTolerance" type="range" min="8" max="100"><output>{{ backgroundTolerance }}</output></label><button class="primary" :disabled="imageProcessing" @click="removeBackground">{{ imageProcessing ? '处理中…' : '去除背景' }}</button><button @click="compressImage">生成下载文件</button></div></section>
+        <section v-if="compressedImage && imageFile" class="compression-result"><div><small>处理结果</small><strong>{{ formatBytes(compressedImage.blob.size) }}</strong></div><button class="primary" @click="downloadCompressedImage">下载 PNG</button></section>
+      </template>
+
+      <template v-else-if="activeTool === 'screen-color'">
+        <header class="toolbox-heading"><div><p>设计工具 / COLOR PICKER</p><h2>屏幕取色</h2><span>从屏幕任意位置吸取颜色，并自动复制 HEX 值。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="color-card"><div class="color-preview" :style="{ background: imageSampleColor || '#eef2ef' }"></div><label>当前颜色<input :value="imageSampleColor" readonly placeholder="点击开始取色"></label><button class="primary" :disabled="!eyeDropperSupported" @click="pickScreenColor">开始取色</button><p class="tool-message">{{ eyeDropperSupported ? '点击后选择屏幕任意位置，颜色会自动复制到剪贴板。' : '当前 Electron 版本不支持系统屏幕取色。' }}</p></section>
       </template>
 
       <template v-else-if="activeTool === 'qrcode'">
