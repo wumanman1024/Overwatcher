@@ -152,6 +152,7 @@ const portState = ref<'idle' | 'loading' | 'terminating' | 'error'>('idle')
 const portMessage = ref('查询当前 Windows 上正在监听的 TCP 端口。')
 const voltaState = ref<VoltaNodeState>()
 const voltaVersionInput = ref('')
+const voltaSelectedVersion = ref('')
 const voltaProjectPath = ref('')
 const voltaBusy = ref(false)
 const voltaMessage = ref('读取本机 Volta 的 Node 工具链状态。')
@@ -200,9 +201,18 @@ const filteredListeningProcesses = computed(() => {
   if (!query) return listeningProcesses.value
   return listeningProcesses.value.filter((process) => `${process.port} ${process.name} ${process.pid} ${process.address}`.toLowerCase().includes(query))
 })
-const visibleNodeReleases = computed(() => showAllNvmReleases.value
-  ? nodeReleases.value
-  : nodeReleases.value.filter((release) => release.channel === 'LTS'))
+const latestLtsNodeReleases = computed(() => {
+  const majors = new Set<string>()
+  return nodeReleases.value.filter((release) => {
+    if (release.channel !== 'LTS') return false
+    const major = release.version.split('.')[0]
+    if (majors.has(major)) return false
+    majors.add(major)
+    return true
+  })
+})
+const visibleNodeReleases = computed(() => showAllNvmReleases.value ? nodeReleases.value : latestLtsNodeReleases.value)
+const voltaDownloadableReleases = latestLtsNodeReleases
 const successfulDeletes = computed(() => deleteResults.value.filter((item) => item.success).length)
 const categories: Array<{ id: ToolCategory; label: string }> = [
   { id: 'all', label: '全部工具' },
@@ -997,6 +1007,9 @@ const refreshVoltaState = async () => {
   voltaBusy.value = true
   try {
     voltaState.value = await window.voltaTools.getNodeState()
+    if (!voltaSelectedVersion.value || !voltaState.value.versions.some((item) => item.version === voltaSelectedVersion.value)) {
+      voltaSelectedVersion.value = voltaState.value.defaultVersion ?? voltaState.value.versions[0]?.version ?? ''
+    }
     voltaMessage.value = voltaState.value.installed
       ? '已读取 Volta 工具链。项目锁定的版本会优先于这里的默认版本。'
       : `未检测到可用的 Volta：${voltaState.value.error ?? '请确认 volta 已加入 PATH。'}`
@@ -1015,8 +1028,25 @@ const installVoltaNode = async (version?: string) => {
   voltaBusy.value = true
   try {
     voltaState.value = await window.voltaTools.installNode(target)
+    voltaSelectedVersion.value = voltaState.value.defaultVersion ?? target
     voltaVersionInput.value = ''
     voltaMessage.value = `Node@${voltaState.value.defaultVersion ?? target} 已安装，并已设为 Volta 默认版本。`
+  } catch (error) {
+    voltaMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    voltaBusy.value = false
+  }
+}
+
+const setVoltaDefault = async () => {
+  if (!window.voltaTools || !voltaSelectedVersion.value) return
+  const version = voltaSelectedVersion.value
+  if (!window.confirm(`将 Volta 默认 Node 切换到 ${version}，是否继续？`)) return
+  voltaBusy.value = true
+  try {
+    voltaState.value = await window.voltaTools.installNode(version)
+    voltaSelectedVersion.value = voltaState.value.defaultVersion ?? version
+    voltaMessage.value = `Node@${voltaSelectedVersion.value} 已设为 Volta 默认版本。`
   } catch (error) {
     voltaMessage.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -1322,16 +1352,17 @@ void refreshNodeReleases()
       <template v-else-if="activeTool === 'volta'">
         <header class="toolbox-heading"><div><p>数据工具 / VOLTA</p><h2>Node.js 版本管理</h2><span>这是 Volta 的可视化入口：界面直接调用本机 Volta，不替代它的版本管理机制。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
         <section class="volta-overview"><div class="volta-summary"><small>VOLTA</small><strong>{{ voltaState?.installed ? `v${voltaState.voltaVersion}` : '未检测' }}</strong><span>{{ voltaState?.installed ? '本机命令行工具链' : '请确认已安装并加入 PATH' }}</span></div><div class="volta-summary"><small>默认 NODE</small><strong>{{ voltaState?.defaultVersion ? `v${voltaState.defaultVersion}` : '—' }}</strong><span>全局默认；项目固定版本优先</span></div><div class="volta-summary"><small>当前 NODE</small><strong>{{ voltaState?.currentVersion ? `v${voltaState.currentVersion}` : '—' }}</strong><span>当前 LocalForge 工作目录的解析结果</span></div></section>
+        <section class="release-catalog"><header><div><p>VOLTA / DOWNLOADABLE NODE</p><h3>可下载 Node 版本</h3><span>目录复用 <code>nvm list available</code>；每个主版本仅保留最新 LTS，安装时只调用 Volta。</span></div><button :disabled="nodeReleasesBusy" @click="refreshNodeReleases">{{ nodeReleasesBusy ? '读取中…' : '刷新列表' }}</button></header><p class="tool-message">{{ nodeReleasesMessage }}</p><div v-if="voltaDownloadableReleases.length" class="release-list"><div v-for="release in voltaDownloadableReleases" :key="release.version" class="release-row"><code>v{{ release.version }}</code><span>LTS</span><small>Node {{ release.version.split('.')[0] }} 主版本的最新 LTS</small><button class="primary" :disabled="voltaBusy || !voltaState?.installed" @click="installVoltaNode(release.version)">Volta 安装</button></div></div><p v-else-if="nodeReleases.length" class="empty-state">NVM 未返回 LTS 版本。</p></section>
         <section v-if="!voltaState?.installed" class="manager-installs"><span>未检测到 Volta，可通过 winget 安装：</span><button :disabled="Boolean(managerInstallBusy)" @click="installVersionManager('volta')">{{ managerInstallBusy === 'volta' ? '正在安装 Volta…' : '安装 Volta' }}</button></section>
-        <section class="volta-actions"><label>Node 版本<input v-model.trim="voltaVersionInput" placeholder="例如 22、22.18.0、lts 或 latest" @keyup.enter="installVoltaNode()"></label><button class="primary" :disabled="voltaBusy" @click="installVoltaNode()">{{ voltaBusy ? '处理中…' : '安装并设为默认' }}</button><button :disabled="voltaBusy" @click="refreshVoltaState">刷新状态</button><p class="tool-message" :class="{ error: voltaState && !voltaState.installed }">{{ voltaMessage }}</p></section>
-        <section v-if="voltaState?.installed" class="results-card volta-versions"><header><div><strong>Volta Node 运行时</strong><small>直接读取 <code>volta list all</code>；该命令只列出本机 Volta 工具链。</small></div></header><div v-if="voltaState.versions.length" class="volta-version-list"><div v-for="item in voltaState.versions" :key="item.version" class="volta-version-row"><code>v{{ item.version }}</code><span v-if="item.isDefault">默认版本</span><button :disabled="voltaBusy || item.isDefault" @click="installVoltaNode(item.version)">{{ item.isDefault ? '正在使用' : '设为默认' }}</button></div></div><p v-else class="empty-state">Volta 未返回 Node 运行时。</p></section>
+        <section class="volta-actions"><label>已安装版本<select v-model="voltaSelectedVersion" :disabled="voltaBusy || !voltaState?.versions.length"><option v-for="item in voltaState?.versions ?? []" :key="item.version" :value="item.version">v{{ item.version }}{{ item.isDefault ? '（默认）' : '' }}</option></select></label><button :disabled="voltaBusy || !voltaSelectedVersion || voltaSelectedVersion === voltaState?.defaultVersion" @click="setVoltaDefault">{{ voltaSelectedVersion === voltaState?.defaultVersion ? '当前默认版本' : '设为默认' }}</button><label>安装新版本<input v-model.trim="voltaVersionInput" placeholder="例如 22、22.18.0、lts 或 latest" @keyup.enter="installVoltaNode()"></label><button class="primary" :disabled="voltaBusy" @click="installVoltaNode()">{{ voltaBusy ? '处理中…' : '安装并设为默认' }}</button><button :disabled="voltaBusy" @click="refreshVoltaState">刷新列表</button><p class="tool-message" :class="{ error: voltaState && !voltaState.installed }">{{ voltaMessage }}</p></section>
+        <section v-if="voltaState?.installed" class="results-card volta-versions"><header><div><strong>Volta Node 运行时</strong><small>直接读取 <code>volta list all</code>；该命令只列出本机 Volta 工具链。</small></div></header><div v-if="voltaState.versions.length" class="volta-version-list"><div v-for="item in voltaState.versions" :key="item.version" class="volta-version-row"><code>v{{ item.version }}</code><span v-if="item.isDefault">默认版本</span><button :disabled="voltaBusy || item.isDefault" @click="voltaSelectedVersion = item.version; setVoltaDefault()">{{ item.isDefault ? '正在使用' : '设为默认' }}</button></div></div><p v-else class="empty-state">Volta 未返回 Node 运行时。</p></section>
         <section class="volta-pin"><div><strong>为项目固定 Node 版本</strong><span>会由 Volta 修改所选项目的 <code>package.json</code>，适合需要提交团队版本约束的项目。</span></div><input :value="voltaProjectPath" readonly placeholder="选择项目目录"><button @click="chooseVoltaProject">选择目录</button><button class="primary" :disabled="voltaBusy || !voltaProjectPath" @click="pinVoltaNode">固定到项目</button></section>
       </template>
 
       <template v-else-if="activeTool === 'nvm'">
         <header class="toolbox-heading"><div><p>数据工具 / NVM</p><h2>NVM Node.js 管理</h2><span>直接调用 NVM for Windows；切换版本会改变系统当前启用的 Node。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
         <section class="nvm-overview"><div><small>NVM</small><strong>{{ nvmState?.installed ? `v${nvmState.nvmVersion}` : '未检测' }}</strong><span>{{ nvmState?.installed ? '本机 NVM for Windows' : '请确认已安装并加入 PATH' }}</span></div><div><small>当前 NODE</small><strong>{{ nvmState?.currentVersion ? `v${nvmState.currentVersion}` : '—' }}</strong><span>由 <code>nvm use</code> 管理</span></div></section>
-        <section class="release-catalog"><header><div><p>NVM LIST AVAILABLE</p><h3>可下载版本</h3><span>直接执行 <code>nvm list available</code>，默认仅显示长期支持版本。</span></div><button :disabled="nodeReleasesBusy" @click="refreshNodeReleases">{{ nodeReleasesBusy ? '读取中…' : '刷新列表' }}</button></header><p class="tool-message">{{ nodeReleasesMessage }}</p><label class="release-filter"><input v-model="showAllNvmReleases" type="checkbox"> 显示所有版本 <small>默认仅显示 LTS（{{ nodeReleases.filter((release) => release.channel === 'LTS').length }} 个）</small></label><div v-if="visibleNodeReleases.length" class="release-list"><div v-for="release in visibleNodeReleases" :key="`${release.channel}-${release.version}`" class="release-row"><code>v{{ release.version }}</code><span :class="`release-channel-${release.channel.toLowerCase().replace(/\s+/g, '-')}`">{{ release.channel }}</span><small>{{ release.channel === 'LTS' ? '长期支持版本' : 'NVM 可安装版本' }}</small><button class="primary" :disabled="nvmBusy || !nvmState?.installed" @click="installNvmNode(release.version)">NVM 安装</button></div></div><p v-else-if="nodeReleases.length" class="empty-state">NVM 没有返回 LTS 版本；开启“显示所有版本”查看完整列表。</p><div v-if="!nvmState?.installed" class="manager-installs"><span>未检测到 NVM，可通过 winget 安装：</span><button :disabled="Boolean(managerInstallBusy)" @click="installVersionManager('nvm')">{{ managerInstallBusy === 'nvm' ? '正在安装 NVM…' : '安装 NVM for Windows' }}</button></div></section>
+        <section class="release-catalog"><header><div><p>NVM LIST AVAILABLE</p><h3>可下载版本</h3><span>直接执行 <code>nvm list available</code>，默认每个主版本仅显示最新长期支持版。</span></div><button :disabled="nodeReleasesBusy" @click="refreshNodeReleases">{{ nodeReleasesBusy ? '读取中…' : '刷新列表' }}</button></header><p class="tool-message">{{ nodeReleasesMessage }}</p><label class="release-filter"><input v-model="showAllNvmReleases" type="checkbox"> 显示所有版本 <small>默认显示 {{ latestLtsNodeReleases.length }} 个 LTS 主版本</small></label><div v-if="visibleNodeReleases.length" class="release-list"><div v-for="release in visibleNodeReleases" :key="`${release.channel}-${release.version}`" class="release-row"><code>v{{ release.version }}</code><span :class="`release-channel-${release.channel.toLowerCase().replace(/\s+/g, '-')}`">{{ release.channel }}</span><small>{{ release.channel === 'LTS' ? '长期支持版本' : 'NVM 可安装版本' }}</small><button class="primary" :disabled="nvmBusy || !nvmState?.installed" @click="installNvmNode(release.version)">NVM 安装</button></div></div><p v-else-if="nodeReleases.length" class="empty-state">NVM 没有返回 LTS 版本；开启“显示所有版本”查看完整列表。</p><div v-if="!nvmState?.installed" class="manager-installs"><span>未检测到 NVM，可通过 winget 安装：</span><button :disabled="Boolean(managerInstallBusy)" @click="installVersionManager('nvm')">{{ managerInstallBusy === 'nvm' ? '正在安装 NVM…' : '安装 NVM for Windows' }}</button></div></section>
         <section class="nvm-actions"><label>Node 版本<input v-model.trim="nvmVersionInput" placeholder="例如 20.19.0 或 22" @keyup.enter="installNvmNode"></label><button class="primary" :disabled="nvmBusy" @click="installNvmNode">{{ nvmBusy ? '处理中…' : '安装版本' }}</button><button :disabled="nvmBusy" @click="refreshNvmState">刷新状态</button><p class="tool-message" :class="{ error: nvmState && !nvmState.installed }">{{ nvmMessage }}</p></section>
         <section v-if="nvmState?.installed" class="results-card nvm-versions"><div v-if="nvmState.versions.length" class="nvm-version-list"><div v-for="item in nvmState.versions" :key="item.version" class="nvm-version-row"><code>v{{ item.version }}</code><span v-if="item.isCurrent">当前使用</span><button :disabled="nvmBusy || item.isCurrent" @click="useNvmNode(item.version)">{{ item.isCurrent ? '正在使用' : '切换到此版本' }}</button><button class="danger" :disabled="nvmBusy || item.isCurrent" @click="uninstallNvmNode(item.version)">移除</button></div></div><p v-else class="empty-state">NVM 中暂未安装 Node 版本。</p></section>
       </template>
