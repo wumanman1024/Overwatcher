@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import QRCode from 'qrcode'
+import jsQR from 'jsqr'
+import YAML from 'yaml'
+import toml from 'smol-toml'
+import { XMLBuilder, XMLParser, XMLValidator } from 'fast-xml-parser'
+import CryptoJS from 'crypto-js'
+import { sm2, sm3, sm4 } from 'sm-crypto'
 import SvgIcon from './components/SvgIcon.vue'
 
 type CleanupTarget = { id: string; path: string }
@@ -33,15 +40,16 @@ declare global {
   }
 }
 
-type ToolView = 'portal' | 'cleanup' | 'json' | 'data-lab' | 'color' | 'image' | 'ip-check' | 'network-diagnosis' | 'ports'
+type ToolView = 'portal' | 'cleanup' | 'json' | 'data-lab' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'ports'
 type ToolCategory = 'all' | 'file' | 'data' | 'network' | 'design'
+const props = defineProps<{ tool: ToolView }>()
 const savedDefaultCategory = localStorage.getItem('localforge:default-category')
 const initialCategory: ToolCategory = savedDefaultCategory === 'file' || savedDefaultCategory === 'data' || savedDefaultCategory === 'network' || savedDefaultCategory === 'design' ? savedDefaultCategory : 'all'
 const savedIndent = Number(localStorage.getItem('localforge:json-indent'))
 const route = useRoute()
 const router = useRouter()
 
-const activeTool = ref<ToolView>('portal')
+const activeTool = ref<ToolView>(props.tool)
 const activeCategory = ref<ToolCategory>(initialCategory)
 const settingsOpen = ref(false)
 const isMaximized = ref(false)
@@ -65,6 +73,34 @@ const dataSource = ref('')
 const dataResult = ref('')
 const dataMessage = ref('输入仅在本地转换，不会上传。')
 const dataOperation = ref<'base64-encode' | 'base64-decode' | 'url-encode' | 'url-decode' | 'timestamp' | 'jwt'>('base64-encode')
+const statsSource = ref('LocalForge 本地开发者工具箱')
+const radixSource = ref('255')
+const radixFrom = ref(10)
+const radixTo = ref(16)
+const radixResult = ref('FF')
+const radixMessage = ref('支持 2 至 36 进制的整数转换。')
+const byteSource = ref('1024')
+const byteUnit = ref<'B' | 'KB' | 'MB' | 'GB' | 'TB'>('KB')
+const byteResult = ref<Array<{ unit: string; value: string }>>([])
+const cryptoAlgorithm = ref<'md5' | 'sha256' | 'sm3' | 'aes' | 'sm4' | 'sm2'>('md5')
+const cryptoOperation = ref<'encrypt' | 'decrypt'>('encrypt')
+const cryptoSource = ref('LocalForge')
+const cryptoKey = ref('')
+const cryptoPublicKey = ref('')
+const cryptoPrivateKey = ref('')
+const cryptoResult = ref('')
+const cryptoMessage = ref('MD5、SHA-256、SM3 为摘要算法；AES、SM4、SM2 支持本地加解密。')
+const diffLeft = ref('name: LocalForge\nversion: 1')
+const diffRight = ref('name: LocalForge\nversion: 2\nlocal: true')
+const convertSource = ref('{\n  "name": "LocalForge",\n  "local": true\n}')
+const convertResult = ref('')
+const convertFrom = ref<'json' | 'yaml' | 'toml' | 'xml'>('json')
+const convertTo = ref<'json' | 'yaml' | 'toml' | 'xml'>('yaml')
+const convertMessage = ref('选择输入与输出格式后转换；所有内容仅在本机处理。')
+const qrText = ref('https://localforge.app')
+const qrImage = ref('')
+const qrMessage = ref('输入文本或 URL 后生成二维码，也可选择图片识别二维码。')
+const qrInput = ref<HTMLInputElement>()
 const networkHost = ref('example.com')
 const networkPort = ref(443)
 const networkMode = ref<'tcp' | 'http' | 'https'>('https')
@@ -82,6 +118,13 @@ const imagePreviewUrl = ref('')
 const imageFile = ref<File>()
 const imageInfo = ref<{ width: number; height: number }>()
 const imageMessage = ref('选择一张本地图片后，可预览并导出 PNG 或 JPEG。')
+const imageCrop = ref({ x: 0, y: 0, width: 0, height: 0 })
+const imageOutputType = ref<'image/png' | 'image/jpeg' | 'image/webp' | 'image/svg+xml'>('image/png')
+const imageQuality = ref(82)
+const backgroundTolerance = ref(36)
+const imageSampleColor = ref('')
+const imageProcessing = ref(false)
+const eyeDropperSupported = 'EyeDropper' in window
 
 const isBusy = computed(() => scanState.value !== 'idle')
 const allSelected = computed(() => targets.value.length > 0 && selectedIds.value.length === targets.value.length)
@@ -102,8 +145,15 @@ const portalTools: Array<{ id: Exclude<ToolView, 'portal'>; category: Exclude<To
   { id: 'cleanup', category: 'file', title: '批量清理目录', description: '递归扫描并清理 node_modules 或指定名称的目录。', state: '文件工具' },
   { id: 'json', category: 'data', title: 'JSON 格式化', description: '格式化、压缩、键排序与本地校验。', state: '数据工具' },
   { id: 'data-lab', category: 'data', title: '开发数据转换台', description: 'Base64、URL、时间戳与 JWT 的本地转换和解析。', state: '数据工具' },
+  { id: 'stats', category: 'data', title: '字数统计', description: '统计字符、汉字、英文词、数字、行数与 UTF-8 字节数。', state: '数据工具' },
+  { id: 'radix', category: 'data', title: '进制转换', description: '在 2 到 36 进制之间转换任意精度整数。', state: '数据工具' },
+  { id: 'bytes', category: 'data', title: '字节单位转换', description: '在 B、KB、MB、GB、TB 间快速换算。', state: '数据工具' },
+  { id: 'crypto', category: 'data', title: '加解密工作台', description: 'MD5、SHA-256、AES 与国密 SM2、SM3、SM4。', state: '数据工具' },
+  { id: 'diff', category: 'data', title: '文本差异对比', description: '逐行比较两段文本，快速查看新增、删除和未变内容。', state: '数据工具' },
+  { id: 'convert', category: 'data', title: '配置格式转换', description: '在 JSON、YAML、TOML 与 XML 之间本地转换。', state: '数据工具' },
   { id: 'color', category: 'design', title: '颜色转换器', description: '在 HEX、RGB 与 HSL 之间转换，并一键复制颜色值。', state: '设计工具' },
   { id: 'image', category: 'design', title: '图片工具', description: '本地预览图片、查看尺寸与体积，并导出 PNG 或 JPEG。', state: '设计工具' },
+  { id: 'qrcode', category: 'design', title: '二维码工具', description: '在本地生成二维码，并识别图片中的二维码内容。', state: '设计工具' },
   { id: 'ports', category: 'network', title: '端口与进程管理', description: '查看本机监听端口，并按需结束关联进程。', state: '网络工具' },
   { id: 'ip-check', category: 'network', title: 'IP 与代理检测', description: '检测当前出口公网 IP，确认代理或 VPN 是否实际生效。', state: '网络工具' },
   { id: 'network-diagnosis', category: 'network', title: '网络诊断', description: 'DNS 解析与 TCP 端口连通性检查。', state: '网络工具' }
@@ -127,8 +177,8 @@ const saveSettings = () => {
   localStorage.setItem('localforge:json-indent', String(jsonIndent.value))
   settingsOpen.value = false
 }
-watch(() => route.name, (name) => {
-  activeTool.value = name === 'cleanup' || name === 'json' || name === 'data-lab' || name === 'color' || name === 'image' || name === 'ip-check' || name === 'network-diagnosis' || name === 'ports' ? name : 'portal'
+watch(() => props.tool, (tool) => {
+  activeTool.value = tool
 }, { immediate: true })
 watch(() => route.query.category, (category) => {
   activeCategory.value = category === 'file' || category === 'data' || category === 'network' || category === 'design' || category === 'all' ? category : initialCategory
@@ -260,6 +310,169 @@ const copyDataResult = async () => {
   await navigator.clipboard.writeText(dataResult.value)
   dataMessage.value = '结果已复制到剪贴板。'
 }
+const textStats = computed(() => {
+  const text = statsSource.value
+  return {
+    characters: Array.from(text).length,
+    noWhitespace: Array.from(text.replace(/\s/g, '')).length,
+    chinese: (text.match(/[\u3400-\u9fff]/g) ?? []).length,
+    words: (text.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? []).length,
+    numbers: (text.match(/\d/g) ?? []).length,
+    lines: text ? text.split(/\r?\n/).length : 0,
+    bytes: new TextEncoder().encode(text).length
+  }
+})
+const parseRadixInteger = (source: string, radix: number): bigint => {
+  const normalized = source.trim().toLowerCase()
+  if (!normalized) throw new Error('请输入整数')
+  const negative = normalized.startsWith('-')
+  const digits = negative || normalized.startsWith('+') ? normalized.slice(1) : normalized
+  if (!digits) throw new Error('请输入有效整数')
+  let value = 0n
+  for (const character of digits) {
+    const digit = Number.parseInt(character, 36)
+    if (!Number.isInteger(digit) || digit >= radix) throw new Error(`“${character}”不属于 ${radix} 进制`)
+    value = value * BigInt(radix) + BigInt(digit)
+  }
+  return negative ? -value : value
+}
+const convertRadix = () => {
+  try {
+    if (radixFrom.value < 2 || radixFrom.value > 36 || radixTo.value < 2 || radixTo.value > 36) throw new Error('进制范围必须是 2 到 36')
+    radixResult.value = parseRadixInteger(radixSource.value, radixFrom.value).toString(radixTo.value).toUpperCase()
+    radixMessage.value = `已转换为 ${radixTo.value} 进制。`
+  } catch (error) { radixMessage.value = `转换失败：${error instanceof Error ? error.message : String(error)}` }
+}
+const convertBytes = () => {
+  const input = Number(byteSource.value)
+  if (!Number.isFinite(input) || input < 0) { byteResult.value = []; return }
+  const bytes = input * 1024 ** ['B', 'KB', 'MB', 'GB', 'TB'].indexOf(byteUnit.value)
+  byteResult.value = ['B', 'KB', 'MB', 'GB', 'TB'].map((unit, index) => ({ unit, value: `${(bytes / 1024 ** index).toLocaleString(undefined, { maximumFractionDigits: 6 })}` }))
+}
+convertBytes()
+const generateSm2Keys = () => {
+  const pair = sm2.generateKeyPairHex()
+  cryptoPrivateKey.value = pair.privateKey
+  cryptoPublicKey.value = pair.publicKey
+  cryptoMessage.value = '已在本机生成 SM2 密钥对；请妥善保存私钥，离开此页面后不会保留。'
+}
+const runCrypto = () => {
+  try {
+    if (!cryptoSource.value) throw new Error('请输入待处理内容')
+    if (cryptoAlgorithm.value === 'md5') cryptoResult.value = CryptoJS.MD5(cryptoSource.value).toString()
+    else if (cryptoAlgorithm.value === 'sha256') cryptoResult.value = CryptoJS.SHA256(cryptoSource.value).toString()
+    else if (cryptoAlgorithm.value === 'sm3') cryptoResult.value = sm3(cryptoSource.value)
+    else if (cryptoAlgorithm.value === 'aes') {
+      if (!cryptoKey.value) throw new Error('请输入 AES 口令')
+      cryptoResult.value = cryptoOperation.value === 'encrypt' ? CryptoJS.AES.encrypt(cryptoSource.value, cryptoKey.value).toString() : CryptoJS.AES.decrypt(cryptoSource.value, cryptoKey.value).toString(CryptoJS.enc.Utf8)
+      if (cryptoOperation.value === 'decrypt' && !cryptoResult.value) throw new Error('解密失败：请确认密文与口令')
+    } else if (cryptoAlgorithm.value === 'sm4') {
+      if (!/^[\da-f]{32}$/i.test(cryptoKey.value)) throw new Error('SM4 密钥必须是 32 位十六进制字符')
+      cryptoResult.value = cryptoOperation.value === 'encrypt' ? sm4.encrypt(cryptoSource.value, cryptoKey.value) : sm4.decrypt(cryptoSource.value, cryptoKey.value)
+    } else {
+      if (cryptoOperation.value === 'encrypt') {
+        if (!cryptoPublicKey.value) throw new Error('请输入 SM2 公钥')
+        cryptoResult.value = sm2.doEncrypt(cryptoSource.value, cryptoPublicKey.value, 1)
+      } else {
+        if (!cryptoPrivateKey.value) throw new Error('请输入 SM2 私钥')
+        cryptoResult.value = sm2.doDecrypt(cryptoSource.value, cryptoPrivateKey.value, 1)
+      }
+    }
+    cryptoMessage.value = cryptoAlgorithm.value === 'md5' || cryptoAlgorithm.value === 'sha256' || cryptoAlgorithm.value === 'sm3' ? '摘要已生成。摘要不可逆，不能用于解密。' : `${cryptoOperation.value === 'encrypt' ? '加密' : '解密'}完成。`
+  } catch (error) { cryptoResult.value = ''; cryptoMessage.value = `处理失败：${error instanceof Error ? error.message : String(error)}` }
+}
+const copyCryptoResult = async () => {
+  if (!cryptoResult.value) return
+  await navigator.clipboard.writeText(cryptoResult.value)
+  cryptoMessage.value = '结果已复制到剪贴板。'
+}
+type DiffRow = { kind: 'same' | 'add' | 'remove'; text: string }
+const diffRows = computed<DiffRow[]>(() => {
+  const left = diffLeft.value.replace(/\r/g, '').split('\n')
+  const right = diffRight.value.replace(/\r/g, '').split('\n')
+  if (left.length + right.length > 2_000) return [{ kind: 'remove', text: '内容过长，请将两侧总行数控制在 2000 行以内。' }]
+  const table = Array.from({ length: left.length + 1 }, () => new Uint16Array(right.length + 1))
+  for (let leftIndex = left.length - 1; leftIndex >= 0; leftIndex -= 1) {
+    for (let rightIndex = right.length - 1; rightIndex >= 0; rightIndex -= 1) table[leftIndex][rightIndex] = left[leftIndex] === right[rightIndex] ? table[leftIndex + 1][rightIndex + 1] + 1 : Math.max(table[leftIndex + 1][rightIndex], table[leftIndex][rightIndex + 1])
+  }
+  const rows: DiffRow[] = []
+  let leftIndex = 0
+  let rightIndex = 0
+  while (leftIndex < left.length && rightIndex < right.length) {
+    if (left[leftIndex] === right[rightIndex]) { rows.push({ kind: 'same', text: left[leftIndex] }); leftIndex += 1; rightIndex += 1 }
+    else if (table[leftIndex + 1][rightIndex] >= table[leftIndex][rightIndex + 1]) { rows.push({ kind: 'remove', text: left[leftIndex] }); leftIndex += 1 }
+    else { rows.push({ kind: 'add', text: right[rightIndex] }); rightIndex += 1 }
+  }
+  while (leftIndex < left.length) rows.push({ kind: 'remove', text: left[leftIndex++] })
+  while (rightIndex < right.length) rows.push({ kind: 'add', text: right[rightIndex++] })
+  return rows
+})
+const copyDiff = async () => {
+  await navigator.clipboard.writeText(diffRows.value.map((row) => `${row.kind === 'add' ? '+' : row.kind === 'remove' ? '-' : ' '} ${row.text}`).join('\n'))
+}
+const parseStructured = (format: 'json' | 'yaml' | 'toml' | 'xml', source: string): unknown => {
+  if (format === 'json') return JSON.parse(source)
+  if (format === 'yaml') return YAML.parse(source)
+  if (format === 'toml') return toml.parse(source)
+  const validation = XMLValidator.validate(source)
+  if (validation !== true) throw new Error(`XML 第 ${validation.err.line} 行：${validation.err.msg}`)
+  return new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' }).parse(source)
+}
+const stringifyStructured = (format: 'json' | 'yaml' | 'toml' | 'xml', value: unknown): string => {
+  if (format === 'json') return JSON.stringify(value, null, jsonIndent.value)
+  if (format === 'yaml') return YAML.stringify(value)
+  if (format === 'toml') return toml.stringify(value as Record<string, unknown>)
+  return new XMLBuilder({ ignoreAttributes: false, attributeNamePrefix: '@_', format: true, indentBy: '  ' }).build(value)
+}
+const convertStructured = () => {
+  try {
+    if (!convertSource.value.trim()) throw new Error('请输入要转换的内容')
+    convertResult.value = stringifyStructured(convertTo.value, parseStructured(convertFrom.value, convertSource.value))
+    convertMessage.value = `${convertFrom.value.toUpperCase()} 已转换为 ${convertTo.value.toUpperCase()}。`
+  } catch (error) {
+    convertMessage.value = `转换失败：${error instanceof Error ? error.message : String(error)}`
+  }
+}
+const copyConvertResult = async () => {
+  if (!convertResult.value) return
+  await navigator.clipboard.writeText(convertResult.value)
+  convertMessage.value = '转换结果已复制到剪贴板。'
+}
+const generateQr = async () => {
+  try {
+    if (!qrText.value.trim()) throw new Error('请输入要编码的文本或 URL')
+    qrImage.value = await QRCode.toDataURL(qrText.value, { errorCorrectionLevel: 'M', margin: 2, width: 360, color: { dark: '#173b2a', light: '#ffffff' } })
+    qrMessage.value = '二维码已生成，内容未离开本机。'
+  } catch (error) {
+    qrMessage.value = `生成失败：${error instanceof Error ? error.message : String(error)}`
+  }
+}
+const downloadQr = () => {
+  if (!qrImage.value) return
+  const link = document.createElement('a')
+  link.href = qrImage.value
+  link.download = 'localforge-qrcode.png'
+  link.click()
+}
+const scanQr = (file: File | undefined) => {
+  if (!file?.type.startsWith('image/')) { qrMessage.value = '请选择一张图片文件。'; return }
+  const image = new Image()
+  const url = URL.createObjectURL(file)
+  image.onload = () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    if (!context) { qrMessage.value = '无法读取图片像素。'; URL.revokeObjectURL(url); return }
+    context.drawImage(image, 0, 0)
+    const code = jsQR(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height)
+    qrMessage.value = code ? '已识别二维码内容。' : '未在图片中发现可识别的二维码。'
+    if (code) qrText.value = code.data
+    URL.revokeObjectURL(url)
+  }
+  image.onerror = () => { qrMessage.value = '图片加载失败。'; URL.revokeObjectURL(url) }
+  image.src = url
+}
 const normalizedHex = computed(() => {
   const value = colorHex.value.trim().replace('#', '')
   if (/^[\da-f]{3}$/i.test(value)) return `#${value.split('').map((part) => part + part).join('').toUpperCase()}`
@@ -293,9 +506,37 @@ const copyColor = async (value: string) => {
 }
 const openImagePicker = () => imageInput.value?.click()
 const formatBytes = (bytes: number) => bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(bytes < 1024 ? 0 : 1)} KB` : `${(bytes / 1024 / 1024).toFixed(2)} MB`
+const loadCanvasImage = (url: string): Promise<HTMLImageElement> => new Promise((resolveImage, rejectImage) => {
+  const image = new Image()
+  image.onload = () => resolveImage(image)
+  image.onerror = () => rejectImage(new Error('图片加载失败'))
+  image.src = url
+})
+const renderImageCanvas = async (): Promise<HTMLCanvasElement> => {
+  if (!imagePreviewUrl.value || !imageInfo.value) throw new Error('请先选择图片')
+  const image = await loadCanvasImage(imagePreviewUrl.value)
+  const x = Math.max(0, Math.min(imageInfo.value.width - 1, Math.floor(imageCrop.value.x)))
+  const y = Math.max(0, Math.min(imageInfo.value.height - 1, Math.floor(imageCrop.value.y)))
+  const width = Math.max(1, Math.min(imageInfo.value.width - x, Math.floor(imageCrop.value.width || imageInfo.value.width)))
+  const height = Math.max(1, Math.min(imageInfo.value.height - y, Math.floor(imageCrop.value.height || imageInfo.value.height)))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('无法创建图片画布')
+  context.drawImage(image, x, y, width, height, 0, 0, width, height)
+  return canvas
+}
+const updatePreviewFromCanvas = (canvas: HTMLCanvasElement, message: string) => {
+  if (imagePreviewUrl.value.startsWith('blob:')) URL.revokeObjectURL(imagePreviewUrl.value)
+  imagePreviewUrl.value = canvas.toDataURL('image/png')
+  imageInfo.value = { width: canvas.width, height: canvas.height }
+  imageCrop.value = { x: 0, y: 0, width: canvas.width, height: canvas.height }
+  imageMessage.value = message
+}
 const loadImage = (file: File | undefined) => {
   if (!file || !file.type.startsWith('image/')) {
-    imageMessage.value = '请选择 PNG、JPEG、WebP、GIF 等图片文件。'
+    imageMessage.value = '请选择 PNG、JPEG、WebP、GIF、BMP 或 SVG 图片文件。'
     return
   }
   if (imagePreviewUrl.value) URL.revokeObjectURL(imagePreviewUrl.value)
@@ -304,27 +545,77 @@ const loadImage = (file: File | undefined) => {
   const image = new Image()
   image.onload = () => {
     imageInfo.value = { width: image.naturalWidth, height: image.naturalHeight }
+    imageCrop.value = { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight }
+    imageSampleColor.value = ''
     imageMessage.value = '图片已加载，所有处理仅在本机完成。'
   }
   image.src = imagePreviewUrl.value
 }
 const onImageSelected = (event: Event) => loadImage((event.target as HTMLInputElement).files?.[0])
 const onImageDropped = (event: DragEvent) => loadImage(event.dataTransfer?.files[0])
-const exportImage = (mimeType: 'image/png' | 'image/jpeg') => {
-  if (!imagePreviewUrl.value || !imageFile.value || !imageInfo.value) return
-  const image = new Image()
-  image.onload = () => {
-    const canvas = document.createElement('canvas')
-    canvas.width = image.naturalWidth
-    canvas.height = image.naturalHeight
-    canvas.getContext('2d')?.drawImage(image, 0, 0)
+const exportImage = async () => {
+  try {
+    const canvas = await renderImageCanvas()
+    const extension = imageOutputType.value === 'image/jpeg' ? 'jpg' : imageOutputType.value === 'image/svg+xml' ? 'svg' : imageOutputType.value.split('/')[1]
     const link = document.createElement('a')
-    link.href = canvas.toDataURL(mimeType, mimeType === 'image/jpeg' ? 0.92 : undefined)
-    link.download = `${imageFile.value?.name.replace(/\.[^.]+$/, '') ?? 'image'}.${mimeType === 'image/png' ? 'png' : 'jpg'}`
+    if (imageOutputType.value === 'image/svg+xml') {
+      const png = canvas.toDataURL('image/png')
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}" viewBox="0 0 ${canvas.width} ${canvas.height}"><image href="${png}" width="100%" height="100%"/></svg>`
+      link.href = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }))
+      link.addEventListener('click', () => setTimeout(() => URL.revokeObjectURL(link.href), 0), { once: true })
+    } else link.href = canvas.toDataURL(imageOutputType.value, imageOutputType.value === 'image/png' ? undefined : imageQuality.value / 100)
+    link.download = `${imageFile.value?.name.replace(/\.[^.]+$/, '') ?? 'image'}.${extension}`
     link.click()
-    imageMessage.value = `已导出 ${mimeType === 'image/png' ? 'PNG' : 'JPEG'} 图片。`
-  }
-  image.src = imagePreviewUrl.value
+    imageMessage.value = `已导出 ${extension.toUpperCase()} 图片。`
+  } catch (error) { imageMessage.value = error instanceof Error ? error.message : String(error) }
+}
+const applyCrop = async () => {
+  try { updatePreviewFromCanvas(await renderImageCanvas(), '裁剪已应用。') } catch (error) { imageMessage.value = error instanceof Error ? error.message : String(error) }
+}
+const removeBackground = async () => {
+  imageProcessing.value = true
+  try {
+    const canvas = await renderImageCanvas()
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    if (!context) throw new Error('无法读取图片像素')
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
+    const { data } = pixels
+    const corners = [0, (canvas.width - 1) * 4, (canvas.height - 1) * canvas.width * 4, ((canvas.height - 1) * canvas.width + canvas.width - 1) * 4]
+    const background = corners.reduce((sum, index) => ({ r: sum.r + data[index], g: sum.g + data[index + 1], b: sum.b + data[index + 2] }), { r: 0, g: 0, b: 0 })
+    background.r /= corners.length; background.g /= corners.length; background.b /= corners.length
+    const threshold = backgroundTolerance.value * backgroundTolerance.value * 3
+    for (let index = 0; index < data.length; index += 4) {
+      const distance = (data[index] - background.r) ** 2 + (data[index + 1] - background.g) ** 2 + (data[index + 2] - background.b) ** 2
+      if (distance <= threshold) data[index + 3] = 0
+    }
+    context.putImageData(pixels, 0, 0)
+    updatePreviewFromCanvas(canvas, '已按图片四角的背景色生成透明区域；复杂背景建议调高容差后重试。')
+  } catch (error) { imageMessage.value = error instanceof Error ? error.message : String(error) } finally { imageProcessing.value = false }
+}
+const sampleImageColor = async (event: MouseEvent) => {
+  if (!imagePreviewUrl.value || !imageInfo.value) return
+  const target = event.currentTarget as HTMLImageElement
+  const bounds = target.getBoundingClientRect()
+  const canvas = document.createElement('canvas')
+  canvas.width = imageInfo.value.width; canvas.height = imageInfo.value.height
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) return
+  context.drawImage(await loadCanvasImage(imagePreviewUrl.value), 0, 0)
+  const x = Math.max(0, Math.min(canvas.width - 1, Math.floor((event.clientX - bounds.left) / bounds.width * canvas.width)))
+  const y = Math.max(0, Math.min(canvas.height - 1, Math.floor((event.clientY - bounds.top) / bounds.height * canvas.height)))
+  const [red, green, blue] = context.getImageData(x, y, 1, 1).data
+  imageSampleColor.value = `#${[red, green, blue].map((value) => value.toString(16).padStart(2, '0')).join('').toUpperCase()}`
+  await navigator.clipboard.writeText(imageSampleColor.value)
+  imageMessage.value = `已吸附并复制 ${imageSampleColor.value}。`
+}
+const pickScreenColor = async () => {
+  try {
+    const EyeDropper = (window as Window & { EyeDropper?: new () => { open(): Promise<{ sRGBHex: string }> } }).EyeDropper
+    if (!EyeDropper) throw new Error('当前 Electron 版本不支持屏幕取色，请点击图片取色。')
+    imageSampleColor.value = (await new EyeDropper().open()).sRGBHex.toUpperCase()
+    await navigator.clipboard.writeText(imageSampleColor.value)
+    imageMessage.value = `已吸附并复制 ${imageSampleColor.value}。`
+  } catch (error) { if (error instanceof Error && error.name !== 'AbortError') imageMessage.value = error.message }
 }
 const checkExitIp = async () => {
   if (!window.networkTools) {
@@ -414,7 +705,7 @@ const terminateProcess = async (process: ListeningProcess) => {
         <header class="toolbox-heading"><p>LOCALFORGE / TOOL PORTAL</p><h2>{{ portalTitle }}</h2><span>选择一项工具开始工作，所有处理均在本机完成。</span></header>
         <section class="portal-list" :aria-label="`${portalTitle}列表`">
           <button v-for="tool in visiblePortalTools" :key="tool.id" class="portal-item" type="button" @click="openTool(tool.id)">
-            <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'json' || tool.id === 'data-lab' ? 'code' : tool.id === 'color' ? 'palette' : tool.id === 'image' ? 'image' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
+            <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'json' || tool.id === 'data-lab' || tool.id === 'stats' || tool.id === 'radix' || tool.id === 'bytes' || tool.id === 'crypto' || tool.id === 'diff' || tool.id === 'convert' ? 'code' : tool.id === 'color' ? 'palette' : tool.id === 'image' || tool.id === 'qrcode' ? 'image' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
             <span class="portal-copy"><em>{{ tool.state }}</em><strong>{{ tool.title }}</strong><small>{{ tool.description }}</small></span>
             <b>›</b>
           </button>
@@ -455,6 +746,40 @@ const terminateProcess = async (process: ListeningProcess) => {
         <section class="json-editors"><label>输入<textarea v-model="dataSource" spellcheck="false" placeholder="粘贴文本、Base64、URL、时间戳或 JWT"></textarea></label><label>结果<textarea v-model="dataResult" spellcheck="false" readonly placeholder="转换结果会出现在这里"></textarea></label></section>
       </template>
 
+      <template v-else-if="activeTool === 'stats'">
+        <header class="toolbox-heading"><div><p>数据工具 / TEXT</p><h2>字数统计</h2><span>实时统计文本字符、词数、行数和 UTF-8 字节长度。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="stats-layout"><label>待统计文本<textarea v-model="statsSource" spellcheck="false" placeholder="输入或粘贴文本"></textarea></label><section class="stats-grid"><div><small>字符数</small><strong>{{ textStats.characters }}</strong></div><div><small>非空白字符</small><strong>{{ textStats.noWhitespace }}</strong></div><div><small>汉字</small><strong>{{ textStats.chinese }}</strong></div><div><small>英文词</small><strong>{{ textStats.words }}</strong></div><div><small>数字</small><strong>{{ textStats.numbers }}</strong></div><div><small>行数</small><strong>{{ textStats.lines }}</strong></div><div><small>UTF-8 字节</small><strong>{{ textStats.bytes }}</strong></div></section></section>
+      </template>
+
+      <template v-else-if="activeTool === 'radix'">
+        <header class="toolbox-heading"><div><p>数据工具 / RADIX</p><h2>进制转换</h2><span>支持 2 至 36 进制的任意精度整数，不受 JavaScript Number 精度限制。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="converter-card"><label>输入数值<input v-model="radixSource" spellcheck="false"></label><label>原进制<input v-model.number="radixFrom" type="number" min="2" max="36"></label><label>目标进制<input v-model.number="radixTo" type="number" min="2" max="36"></label><button class="primary" @click="convertRadix">转换</button><p class="tool-message">{{ radixMessage }}</p><label class="converter-result">转换结果<textarea v-model="radixResult" readonly></textarea></label></section>
+      </template>
+
+      <template v-else-if="activeTool === 'bytes'">
+        <header class="toolbox-heading"><div><p>数据工具 / BYTES</p><h2>字节单位转换</h2><span>采用 1 KB = 1024 B 的二进制换算方式。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="converter-card byte-card"><label>数值<input v-model="byteSource" type="number" min="0" @input="convertBytes"></label><label>输入单位<select v-model="byteUnit" @change="convertBytes"><option>B</option><option>KB</option><option>MB</option><option>GB</option><option>TB</option></select></label><section class="byte-results"><div v-for="item in byteResult" :key="item.unit"><small>{{ item.unit }}</small><strong>{{ item.value }}</strong></div></section></section>
+      </template>
+
+      <template v-else-if="activeTool === 'crypto'">
+        <header class="toolbox-heading"><div><p>数据工具 / CRYPTO</p><h2>加解密工作台</h2><span>处理仅在本机完成。不要在不可信设备或页面中输入生产密钥。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="crypto-card"><div class="crypto-actions"><label>算法<select v-model="cryptoAlgorithm"><option value="md5">MD5 摘要</option><option value="sha256">SHA-256 摘要</option><option value="sm3">SM3 摘要</option><option value="aes">AES</option><option value="sm4">SM4</option><option value="sm2">SM2</option></select></label><label v-if="!['md5', 'sha256', 'sm3'].includes(cryptoAlgorithm)">操作<select v-model="cryptoOperation"><option value="encrypt">加密</option><option value="decrypt">解密</option></select></label></div><label>输入<textarea v-model="cryptoSource" spellcheck="false" placeholder="输入明文、密文或待计算摘要的内容"></textarea></label><template v-if="cryptoAlgorithm === 'aes' || cryptoAlgorithm === 'sm4'"><label>{{ cryptoAlgorithm === 'sm4' ? 'SM4 密钥（32 位十六进制）' : 'AES 口令' }}<input v-model="cryptoKey" :type="cryptoAlgorithm === 'aes' ? 'password' : 'text'"></label></template><template v-else-if="cryptoAlgorithm === 'sm2'"><div class="sm2-key-actions"><button @click="generateSm2Keys">生成 SM2 密钥对</button></div><label>SM2 公钥（加密使用）<textarea v-model="cryptoPublicKey" spellcheck="false"></textarea></label><label>SM2 私钥（解密使用）<textarea v-model="cryptoPrivateKey" spellcheck="false"></textarea></label></template><div class="crypto-run"><button class="primary" @click="runCrypto">{{ ['md5', 'sha256', 'sm3'].includes(cryptoAlgorithm) ? '生成摘要' : cryptoOperation === 'encrypt' ? '加密' : '解密' }}</button><button :disabled="!cryptoResult" @click="copyCryptoResult">复制结果</button></div><p class="tool-message">{{ cryptoMessage }}</p><label>结果<textarea v-model="cryptoResult" readonly spellcheck="false"></textarea></label></section>
+      </template>
+
+      <template v-else-if="activeTool === 'diff'">
+        <header class="toolbox-heading"><div><p>数据工具 / DIFF</p><h2>文本差异对比</h2><span>按行比较两段文本；绿色为新增、红色为删除、白色为未变内容。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="json-actions"><button :disabled="!diffRows.length" @click="copyDiff">复制统一 Diff</button><small class="diff-summary">共 {{ diffRows.length }} 行差异结果</small></section>
+        <section class="json-editors diff-editors"><label>原始文本<textarea v-model="diffLeft" spellcheck="false" placeholder="粘贴原始文本"></textarea></label><label>目标文本<textarea v-model="diffRight" spellcheck="false" placeholder="粘贴目标文本"></textarea></label></section>
+        <section class="diff-result" aria-label="差异结果"><p v-for="(row, index) in diffRows" :key="index" :class="row.kind"><b>{{ row.kind === 'add' ? '+' : row.kind === 'remove' ? '−' : ' ' }}</b><code>{{ row.text || ' ' }}</code></p></section>
+      </template>
+
+      <template v-else-if="activeTool === 'convert'">
+        <header class="toolbox-heading"><div><p>数据工具 / CONFIG</p><h2>配置格式转换</h2><span>在 JSON、YAML、TOML 和 XML 间进行本地转换，XML 属性保留为 <code>@_属性名</code>。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="json-actions"><label>输入格式 <select v-model="convertFrom"><option value="json">JSON</option><option value="yaml">YAML</option><option value="toml">TOML</option><option value="xml">XML</option></select></label><label>输出格式 <select v-model="convertTo"><option value="json">JSON</option><option value="yaml">YAML</option><option value="toml">TOML</option><option value="xml">XML</option></select></label><button class="primary" @click="convertStructured">开始转换</button><button :disabled="!convertResult" @click="copyConvertResult">复制结果</button></section>
+        <p class="tool-message">{{ convertMessage }}</p>
+        <section class="json-editors"><label>输入<textarea v-model="convertSource" spellcheck="false" placeholder="粘贴配置内容"></textarea></label><label>结果<textarea v-model="convertResult" spellcheck="false" readonly placeholder="转换结果会出现在这里"></textarea></label></section>
+      </template>
+
       <template v-else-if="activeTool === 'color'">
         <header class="toolbox-heading"><div><p>设计工具 / 颜色</p><h2>颜色转换器</h2><span>输入 HEX 颜色，快速获得 RGB 与 HSL 表示法。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
         <section class="color-card">
@@ -471,17 +796,28 @@ const terminateProcess = async (process: ListeningProcess) => {
       </template>
 
       <template v-else-if="activeTool === 'image'">
-        <header class="toolbox-heading"><div><p>设计工具 / 图片</p><h2>本地图片工具</h2><span>预览图片、查看尺寸和体积，并导出 PNG 或 JPEG。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
-        <input ref="imageInput" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" @change="onImageSelected">
+        <header class="toolbox-heading"><div><p>设计工具 / 图片</p><h2>本地图片工作台</h2><span>取色、去背景、压缩、格式互换与裁剪，所有处理均在本机进行。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <input ref="imageInput" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml" @change="onImageSelected">
         <section class="image-dropzone" :class="{ 'has-image': imagePreviewUrl }" @click="openImagePicker" @dragover.prevent @drop.prevent="onImageDropped">
-          <img v-if="imagePreviewUrl" :src="imagePreviewUrl" :alt="imageFile?.name ?? '图片预览'">
-          <div v-else><SvgIcon name="image" /><strong>选择或拖入图片</strong><span>支持 PNG、JPEG、WebP、GIF 与 BMP</span></div>
+          <img v-if="imagePreviewUrl" :src="imagePreviewUrl" :alt="imageFile?.name ?? '图片预览'" title="点击图片吸附颜色" @click.stop="sampleImageColor">
+          <div v-else><SvgIcon name="image" /><strong>选择或拖入图片</strong><span>支持 PNG、JPEG、WebP、GIF、BMP 与 SVG</span></div>
         </section>
         <p class="tool-message">{{ imageMessage }}</p>
         <section v-if="imageFile && imageInfo" class="image-details">
           <div><small>文件名称</small><strong>{{ imageFile.name }}</strong></div><div><small>像素尺寸</small><strong>{{ imageInfo.width }} × {{ imageInfo.height }}</strong></div><div><small>文件大小</small><strong>{{ formatBytes(imageFile.size) }}</strong></div>
-          <div class="image-actions"><button class="primary" @click="exportImage('image/png')">导出 PNG</button><button @click="exportImage('image/jpeg')">导出 JPEG</button></div>
+          <div class="image-actions"><button @click.stop="pickScreenColor">{{ eyeDropperSupported ? '屏幕取色' : '图片取色' }}</button><button v-if="imageSampleColor" class="color-chip" :style="{ background: imageSampleColor }" :title="imageSampleColor">{{ imageSampleColor }}</button></div>
         </section>
+        <section v-if="imageFile && imageInfo" class="image-workbench">
+          <div><h3>裁剪</h3><p>按像素设定裁剪区域，点击应用后将以裁剪结果继续编辑。</p><label>X <input v-model.number="imageCrop.x" type="number" min="0" :max="Math.max(0, imageInfo.width - 1)"></label><label>Y <input v-model.number="imageCrop.y" type="number" min="0" :max="Math.max(0, imageInfo.height - 1)"></label><label>宽 <input v-model.number="imageCrop.width" type="number" min="1" :max="imageInfo.width - imageCrop.x"></label><label>高 <input v-model.number="imageCrop.height" type="number" min="1" :max="imageInfo.height - imageCrop.y"></label><button @click="applyCrop">应用裁剪</button></div>
+          <div><h3>背景透明化</h3><p>根据图片四角颜色移除接近的背景，适合白底、纯色背景。</p><label>容差 <input v-model.number="backgroundTolerance" type="range" min="8" max="100"><output>{{ backgroundTolerance }}</output></label><button :disabled="imageProcessing" @click="removeBackground">{{ imageProcessing ? '处理中…' : '去除背景' }}</button></div>
+          <div><h3>压缩与格式</h3><p>使用浏览器原生编码器进行有损压缩，类似 TinyPNG 的核心效果。</p><label>格式 <select v-model="imageOutputType"><option value="image/png">PNG</option><option value="image/jpeg">JPG</option><option value="image/webp">WebP</option><option value="image/svg+xml">SVG（嵌入图片）</option></select></label><label>质量 <input v-model.number="imageQuality" type="range" min="20" max="100" :disabled="imageOutputType === 'image/png' || imageOutputType === 'image/svg+xml'"><output>{{ imageQuality }}%</output></label><button class="primary" @click="exportImage">压缩并下载</button></div>
+        </section>
+      </template>
+
+      <template v-else-if="activeTool === 'qrcode'">
+        <header class="toolbox-heading"><div><p>设计工具 / QR CODE</p><h2>二维码工具</h2><span>生成二维码或从本地图片中识别内容，处理过程不经过网络。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <input ref="qrInput" class="visually-hidden" type="file" accept="image/*" @change="scanQr(($event.target as HTMLInputElement).files?.[0])">
+        <section class="qr-card"><label>二维码内容<textarea v-model="qrText" spellcheck="false" placeholder="输入文本或 URL"></textarea></label><div class="qr-actions"><button class="primary" @click="generateQr">生成二维码</button><button @click="qrInput?.click()">识别本地图片</button><button :disabled="!qrImage" @click="downloadQr">下载 PNG</button></div><p class="tool-message">{{ qrMessage }}</p><img v-if="qrImage" :src="qrImage" alt="生成的二维码"></section>
       </template>
 
       <template v-else-if="activeTool === 'ports'">

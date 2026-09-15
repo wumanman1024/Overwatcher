@@ -78,7 +78,6 @@ const metricExtraDisplay = (metric: MetricValue | undefined, label: string) => {
 }
 const activeMetricValue = computed(() => snapshot.value?.[activeMetric.value.key])
 const activeMetricDisplay = computed(() => metricDisplay(activeMetricValue.value ?? { available: false }))
-const activeSecondary = computed(() => metricExtraDisplay(activeMetricValue.value, '温度'))
 const activeFill = computed(() => metricProgress(activeMetricValue.value ?? { available: false }))
 const activeMetricHealth = computed(() => metricHealth(activeMetric.value.key, activeMetricValue.value))
 const networkDown = computed(() => metricExtraDisplay(snapshot.value?.network, '下载'))
@@ -111,7 +110,6 @@ const handlePointerLeave = () => { isRotationPaused.value = false }
           <div :key="activeMetric.key" class="orb-reading">
             <span class="orb-label"><i></i>{{ activeMetric.label }}</span>
             <strong><span>{{ activeMetricDisplay.value }}</span><small v-if="activeMetricDisplay.unit">{{ activeMetricDisplay.unit }}</small></strong>
-            <span v-if="activeSecondary" class="orb-secondary"><i>◆</i>{{ activeSecondary.value }}<small v-if="activeSecondary.unit">{{ activeSecondary.unit }}</small></span>
           </div>
         </Transition>
       </div>

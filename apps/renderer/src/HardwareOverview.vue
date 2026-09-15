@@ -82,10 +82,6 @@ const coreMetrics = computed(() => ([
   { key: 'network', label: '网络', metric: props.snapshot.network }
 ] satisfies Array<{ key: MetricKey; label: string; metric: MetricValue }>))
 const coreMetricHealth = (key: MetricKey, metric: MetricValue) => metricHealth(key, metric)
-const coreMetricTemperature = (metric: MetricValue): string | undefined => {
-  const temperature = metric.extras?.find((item) => item.label.includes('温度'))
-  return temperature ? formatExtra(temperature.value, temperature.unit) : undefined
-}
 </script>
 
 <template>
@@ -101,7 +97,7 @@ const coreMetricTemperature = (metric: MetricValue): string | undefined => {
       <div class="core-readings">
         <div v-for="item in coreMetrics" :key="item.key" :class="[{ 'network-reading': item.key === 'network' }, `status-${coreMetricHealth(item.key, item.metric)}`]">
           <span class="reading-label"><HardwareIcon :type="item.key" />{{ item.label }}<em v-if="item.key !== 'network'" class="reading-status">{{ metricHealthLabel[coreMetricHealth(item.key, item.metric)] }}</em></span>
-          <strong v-if="item.key !== 'network'" class="reading-value"><span>{{ formatMetric(item.metric) }}</span><small class="reading-temperature">温 {{ coreMetricTemperature(item.metric) ?? '—' }}</small></strong>
+          <strong v-if="item.key !== 'network'" class="reading-value"><span>{{ formatMetric(item.metric) }}</span></strong>
           <strong v-else class="network-directions"><span><b>↓</b><em :title="networkDown">{{ networkDown }}</em></span><span><i>↑</i><em :title="networkUp">{{ networkUp }}</em></span></strong>
         </div>
       </div>
