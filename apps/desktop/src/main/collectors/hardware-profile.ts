@@ -1,7 +1,7 @@
 import si from 'systeminformation'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { HardwareField, HardwareProfile, HardwareSection } from '@hardware-overlay/shared/metrics'
+import type { HardwareField, HardwareProfile, HardwareSection } from '@localforge/shared/metrics'
 import { formatBytes } from './base'
 
 const execFileAsync = promisify(execFile)

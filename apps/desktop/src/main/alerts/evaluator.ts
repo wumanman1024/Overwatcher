@@ -1,4 +1,4 @@
-import type { AlertSeverity } from '@hardware-overlay/shared/metrics'
+import type { AlertSeverity } from '@localforge/shared/metrics'
 
 export interface Threshold {
   warning: number

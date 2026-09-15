@@ -1,5 +1,5 @@
 {
-  "name": "@hardware-overlay/desktop",
+  "name": "@localforge/desktop",
   "version": "0.1.0",
   "private": true,
   "main": "./out/main/index.js",
@@ -13,13 +13,12 @@
     "package:mac": "pnpm run build && electron-builder --mac dmg --publish never",
     "package:linux": "pnpm run build && electron-builder --linux AppImage deb --publish never",
     "preview": "electron-vite preview",
-    "test": "vitest run",
     "fix-sandbox": "chown root:root node_modules/electron/dist/chrome-sandbox && chmod 4755 node_modules/electron/dist/chrome-sandbox"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^4.0.0",
-    "@hardware-overlay/shared": "workspace:*",
+    "@localforge/shared": "workspace:*",
     "electron-store": "^10.0.0",
     "systeminformation": "^5.24.0"
   },
@@ -30,22 +29,47 @@
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
-    "jsdom": "^25.0.1",
+    "fast-glob": "^3.3.3",
     "typescript": "^5.7.2",
     "vite": "^5.4.10",
-    "vitest": "^2.1.8"
+    "vite-plugin-svg-icons": "^2.0.1"
   },
   "build": {
-    "appId": "com.hardwareoverlay.app",
-    "productName": "硬件监控",
-    "executableName": "hardware-overlay",
-    "icon": "build/core-pulse-icon.png",
+    "appId": "com.localforge.app",
+    "productName": "LocalForge",
+    "executableName": "localforge",
+    "icon": "build/app-icon.png",
     "afterPack": "build/after-pack.cjs",
-    "directories": { "output": "release" },
-    "files": ["out/**/*", "package.json"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      "build/app-icon.png",
+      "build/tray-icon.png"
+    ],
     "asar": true,
-    "linux": { "target": ["AppImage", "deb"], "category": "Utility", "maintainer": "Hardware Overlay <maintainer@example.invalid>" },
-    "win": { "target": ["nsis"] },
-    "mac": { "target": ["dmg"], "category": "public.app-category.utilities" }
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility",
+      "maintainer": "Hardware Overlay <maintainer@example.invalid>"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.utilities"
+    }
   }
 }

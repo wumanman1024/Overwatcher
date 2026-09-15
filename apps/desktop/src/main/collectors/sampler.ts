@@ -1,4 +1,4 @@
-import type { MetricKey, MetricSnapshot, MetricValue } from '@hardware-overlay/shared/metrics'
+import type { MetricKey, MetricSnapshot, MetricValue } from '@localforge/shared/metrics'
 
 export type CollectorResult = Partial<Record<MetricKey, MetricValue>>
 export type Collector = () => Promise<CollectorResult>

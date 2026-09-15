@@ -1,4 +1,4 @@
-import type { MetricSnapshot, MetricValue } from '@hardware-overlay/shared/metrics'
+import type { MetricSnapshot, MetricValue } from '@localforge/shared/metrics'
 
 export interface TelemetrySample {
   timestamp: number

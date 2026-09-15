@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import type { MetricSnapshot, MetricValue } from '@hardware-overlay/shared/metrics'
+import type { MetricSnapshot, MetricValue } from '@localforge/shared/metrics'
 import { formatExtra, formatMetric } from './metric-display'
-import { shouldOpenPanelOnPointerUp } from '@hardware-overlay/shared/overlay-state'
+import { metricHealth } from './metric-health'
+import { shouldOpenPanelOnPointerUp } from '@localforge/shared/overlay-state'
 import HardwareOverview from './HardwareOverview.vue'
+import { RouterView } from 'vue-router'
+import SvgIcon from './components/SvgIcon.vue'
 
-declare global { interface Window { hardwareMonitor: { getSnapshot(): Promise<MetricSnapshot | undefined>; getHistory(): Promise<MetricSnapshot[]>; subscribe(callback: (snapshot: MetricSnapshot) => void): () => void; moveOverlay(position: { x: number; y: number }): void; movePanel(position: { x: number; y: number }): void; moveTrend(position: { x: number; y: number }): void; openPanel(): void; closePanel(): void; openTrend(): void; closeTrend(): void; subscribeStatus(callback: (text: string) => void): () => void } } }
+declare global { interface Window { hardwareMonitor: { getSnapshot(): Promise<MetricSnapshot | undefined>; getHistory(): Promise<MetricSnapshot[]>; subscribe(callback: (snapshot: MetricSnapshot) => void): () => void; moveOverlay(position: { x: number; y: number }): void; movePanel(position: { x: number; y: number }): void; moveTrend(position: { x: number; y: number }): void; openPanel(): void; closePanel(): void; openTrend(): void; closeTrend(): void; subscribeStatus(callback: (text: string) => void): () => void }; windowControls: { minimize(): void; toggleMaximize(): void; close(): void; isMaximized(): Promise<boolean> } } }
 
 const snapshot = ref<MetricSnapshot>()
 const orbMetrics = [
@@ -15,9 +18,11 @@ const orbMetrics = [
 ] as const
 let unsubscribe: (() => void) | undefined
 const isPanelSurface = new URLSearchParams(location.search).get('surface') === 'panel'
+const isToolboxSurface = new URLSearchParams(location.search).get('surface') === 'toolbox'
 const isExpanded = ref(isPanelSurface)
 const activeMetricIndex = ref(0)
 const isRotationPaused = ref(false)
+const isWindowMaximized = ref(false)
 let rotationInterval: ReturnType<typeof setInterval> | undefined
 let drag: { x: number; y: number; screenX: number; screenY: number } | undefined
 const reportRendererError = (scope: string, error: unknown) => console.error(`[硬件监控] ${scope}`, error)
@@ -35,6 +40,7 @@ onMounted(async () => {
   rotationInterval = setInterval(() => {
     if (!isRotationPaused.value && !isExpanded.value) activeMetricIndex.value = (activeMetricIndex.value + 1) % orbMetrics.length
   }, 2500)
+  if (isPanelSurface) isWindowMaximized.value = await window.windowControls.isMaximized()
 })
 onUnmounted(() => {
   window.removeEventListener('error', handleWindowError)
@@ -53,6 +59,12 @@ const stopDrag = (event: PointerEvent) => {
 const cancelDrag = () => { drag = undefined }
 const openPanel = () => { if (!isPanelSurface) window.hardwareMonitor.openPanel() }
 const closePanel = () => window.hardwareMonitor.closePanel()
+const minimizeWindow = () => window.windowControls.minimize()
+const toggleMaximizeWindow = async () => {
+  window.windowControls.toggleMaximize()
+  isWindowMaximized.value = await window.windowControls.isMaximized()
+}
+const closeWindow = () => window.windowControls.close()
 const activeMetric = computed(() => orbMetrics[activeMetricIndex.value % orbMetrics.length] ?? orbMetrics[0])
 const metricProgress = (metric: MetricValue) => Math.min(Math.max(metric.value ?? 0, 0), 100)
 const splitDisplay = (formatted: string) => {
@@ -68,6 +80,7 @@ const activeMetricValue = computed(() => snapshot.value?.[activeMetric.value.key
 const activeMetricDisplay = computed(() => metricDisplay(activeMetricValue.value ?? { available: false }))
 const activeSecondary = computed(() => metricExtraDisplay(activeMetricValue.value, '温度'))
 const activeFill = computed(() => metricProgress(activeMetricValue.value ?? { available: false }))
+const activeMetricHealth = computed(() => metricHealth(activeMetric.value.key, activeMetricValue.value))
 const networkDown = computed(() => metricExtraDisplay(snapshot.value?.network, '下载'))
 const networkUp = computed(() => metricExtraDisplay(snapshot.value?.network, '上传'))
 const pauseRotation = () => { isRotationPaused.value = true }
@@ -75,7 +88,9 @@ const handlePointerLeave = () => { isRotationPaused.value = false }
 </script>
 
 <template>
+  <RouterView v-if="isToolboxSurface" />
   <main
+    v-else
     class="overlay"
     :class="{ expanded: isExpanded, 'orb-window': !isPanelSurface }"
     :aria-expanded="isExpanded"
@@ -89,7 +104,7 @@ const handlePointerLeave = () => { isRotationPaused.value = false }
     @pointerup="stopDrag"
     @pointercancel="cancelDrag"
   >
-    <div v-if="snapshot && !isPanelSurface" class="orb-face">
+    <div v-if="snapshot && !isPanelSurface" class="orb-face" :class="`status-${activeMetricHealth}`">
       <div class="orb-core">
         <div class="orb-liquid" :style="{ height: `${activeFill}%` }" aria-hidden="true"><i></i><i></i></div>
         <Transition name="metric-swap">
@@ -113,7 +128,11 @@ const handlePointerLeave = () => { isRotationPaused.value = false }
           <p>CORE PULSE · LOCAL</p>
           <h1>监控中心</h1>
         </div>
-        <button class="panel-close" type="button" aria-label="关闭面板" @pointerdown.stop @pointerup.stop @click.stop="closePanel">×</button>
+        <div class="window-controls panel-window-controls" aria-label="窗口控制">
+          <button type="button" aria-label="最小化" title="最小化" @pointerdown.stop @pointerup.stop @click.stop="minimizeWindow"><SvgIcon name="window-minimize" /></button>
+          <button type="button" :aria-label="isWindowMaximized ? '还原窗口' : '最大化'" :title="isWindowMaximized ? '还原窗口' : '最大化'" @pointerdown.stop @pointerup.stop @click.stop="toggleMaximizeWindow"><SvgIcon :name="isWindowMaximized ? 'window-restore' : 'window-maximize'" /></button>
+          <button class="window-control-close" type="button" aria-label="关闭" title="关闭" @pointerdown.stop @pointerup.stop @click.stop="closeWindow"><SvgIcon name="window-close" /></button>
+        </div>
       </header>
 
       <template v-if="snapshot">

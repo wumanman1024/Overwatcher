@@ -1,24 +1,23 @@
 {
-  "name": "hardware-overlay-workspace",
+  "name": "localforge-workspace",
   "version": "0.1.0",
-  "description": "跨平台硬件监控悬浮窗",
+  "description": "本地开发者工具箱，包含硬件监控与常用效率工具",
   "author": {
     "name": "Hardware Overlay",
     "email": "maintainer@example.invalid"
   },
-  "homepage": "https://example.invalid/hardware-overlay",
+  "homepage": "https://example.invalid/localforge",
   "private": true,
   "packageManager": "pnpm@11.7.0",
   "scripts": {
-    "dev": "pnpm --filter @hardware-overlay/desktop dev",
-    "build": "pnpm --filter @hardware-overlay/shared build && pnpm --filter @hardware-overlay/desktop build",
-    "preview": "pnpm --filter @hardware-overlay/desktop preview",
-    "test": "pnpm --filter @hardware-overlay/shared test && pnpm --filter @hardware-overlay/desktop test",
-    "package": "pnpm --filter @hardware-overlay/desktop package",
-    "package:win": "pnpm --filter @hardware-overlay/desktop package:win",
-    "package:portable": "pnpm --filter @hardware-overlay/desktop package:portable",
-    "package:mac": "pnpm --filter @hardware-overlay/desktop package:mac",
-    "package:linux": "pnpm --filter @hardware-overlay/desktop package:linux",
-    "fix-sandbox": "pnpm --filter @hardware-overlay/desktop fix-sandbox"
+    "dev": "pnpm --filter @localforge/desktop dev",
+    "build": "pnpm --filter @localforge/shared build && pnpm --filter @localforge/desktop build",
+    "preview": "pnpm --filter @localforge/desktop preview",
+    "package": "pnpm --filter @localforge/desktop package",
+    "package:win": "pnpm --filter @localforge/desktop package:win",
+    "package:portable": "pnpm --filter @localforge/desktop package:portable",
+    "package:mac": "pnpm --filter @localforge/desktop package:mac",
+    "package:linux": "pnpm --filter @localforge/desktop package:linux",
+    "fix-sandbox": "pnpm --filter @localforge/desktop fix-sandbox"
   }
 }

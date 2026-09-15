@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { HardwareField, HardwareSection, MetricKey, MetricSnapshot, MetricValue } from '@hardware-overlay/shared/metrics'
+import type { HardwareField, HardwareSection, MetricKey, MetricSnapshot, MetricValue } from '@localforge/shared/metrics'
 import { formatExtra, formatMetric } from './metric-display'
+import { metricHealth, metricHealthLabel } from './metric-health'
 import HardwareIcon from './HardwareIcon.vue'
 
 const props = defineProps<{ snapshot: MetricSnapshot }>()
@@ -71,6 +72,7 @@ const coreMetrics = computed(() => ([
   { key: 'disk', label: '磁盘', metric: props.snapshot.disk },
   { key: 'network', label: '网络', metric: props.snapshot.network }
 ] satisfies Array<{ key: MetricKey; label: string; metric: MetricValue }>))
+const coreMetricHealth = (key: MetricKey, metric: MetricValue) => metricHealth(key, metric)
 </script>
 
 <template>
@@ -84,8 +86,8 @@ const coreMetrics = computed(() => ([
 
     <div class="hardware-content">
       <div class="core-readings">
-        <div v-for="item in coreMetrics" :key="item.key" :class="{ 'network-reading': item.key === 'network' }">
-          <span class="reading-label"><HardwareIcon :type="item.key" />{{ item.label }}</span>
+        <div v-for="item in coreMetrics" :key="item.key" :class="[{ 'network-reading': item.key === 'network' }, `status-${coreMetricHealth(item.key, item.metric)}`]">
+          <span class="reading-label"><HardwareIcon :type="item.key" />{{ item.label }}<em v-if="item.key !== 'network'" class="reading-status">{{ metricHealthLabel[coreMetricHealth(item.key, item.metric)] }}</em></span>
           <strong v-if="item.key !== 'network'">{{ formatMetric(item.metric) }}</strong>
           <strong v-else class="network-directions"><b>↓</b>{{ networkDown }}<i>↑</i>{{ networkUp }}</strong>
         </div>

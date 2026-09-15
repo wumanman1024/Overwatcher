@@ -1,5 +1,5 @@
-import type { MetricSnapshot, MetricValue } from '@hardware-overlay/shared/metrics'
-import { formatMetricValue, formatRate } from '@hardware-overlay/shared/formatters'
+import type { MetricSnapshot, MetricValue } from '@localforge/shared/metrics'
+import { formatMetricValue, formatRate } from '@localforge/shared/formatters'
 
 const findRate = (metric: MetricValue, label: string): number | undefined => {
   const value = metric.extras?.find((extra) => extra.label === label)?.value
