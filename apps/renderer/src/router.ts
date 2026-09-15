@@ -15,6 +15,9 @@ import QrcodeTool from './tools/QrcodeTool.vue'
 import PortsTool from './tools/PortsTool.vue'
 import IpCheckTool from './tools/IpCheckTool.vue'
 import NetworkDiagnosisTool from './tools/NetworkDiagnosisTool.vue'
+import VoltaTool from './tools/VoltaTool.vue'
+import NvmTool from './tools/NvmTool.vue'
+import AssistantPromptTool from './tools/AssistantPromptTool.vue'
 
 export const router = createRouter({
   history: createMemoryHistory(),
@@ -34,6 +37,9 @@ export const router = createRouter({
     { path: '/qrcode', name: 'qrcode', component: QrcodeTool },
     { path: '/ports', name: 'ports', component: PortsTool },
     { path: '/ip-check', name: 'ip-check', component: IpCheckTool },
-    { path: '/network-diagnosis', name: 'network-diagnosis', component: NetworkDiagnosisTool }
+    { path: '/network-diagnosis', name: 'network-diagnosis', component: NetworkDiagnosisTool },
+    { path: '/volta', name: 'volta', component: VoltaTool },
+    { path: '/nvm', name: 'nvm', component: NvmTool },
+    { path: '/assistant-prompt', name: 'assistant-prompt', component: AssistantPromptTool }
   ]
 })

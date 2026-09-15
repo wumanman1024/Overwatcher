@@ -8,13 +8,22 @@ import toml from 'smol-toml'
 import { XMLBuilder, XMLParser, XMLValidator } from 'fast-xml-parser'
 import CryptoJS from 'crypto-js'
 import { sm2, sm3, sm4 } from 'sm-crypto'
+import { ElMessage } from 'element-plus'
 import SvgIcon from './components/SvgIcon.vue'
 
 type CleanupTarget = { id: string; path: string }
 type DeleteResult = { id: string; path?: string; success: boolean; error?: string }
 type ExitIpResult = { ip: string; country: string; city: string; isp: string; timezone: string }
+type LocalIpv4 = { name: string; address: string }
 type ListeningProcess = { protocol: string; address: string; port: number; pid: number; name: string }
 type NetworkDiagnosis = { host: string; port: number; addresses: string[]; ipv4: string[]; ipv6: string[]; tcp: { reachable: boolean; latencyMs?: number; error?: string }; http?: { reachable: boolean; status?: number; statusText?: string; latencyMs?: number; error?: string } }
+type BatchImage = { id: string; file: File; status: 'waiting' | 'compressing' | 'ready' | 'failed'; resultSize?: number; error?: string; outputName?: string }
+type VoltaNodeState = { installed: boolean; voltaVersion?: string; versions: Array<{ version: string; isDefault: boolean }>; defaultVersion?: string; currentVersion?: string; error?: string }
+type NvmNodeState = { installed: boolean; nvmVersion?: string; versions: Array<{ version: string; isCurrent: boolean }>; currentVersion?: string; error?: string }
+type NodeRelease = { version: string; channel: 'CURRENT' | 'LTS' | 'OLD STABLE' | 'OLD UNSTABLE' }
+type AssistantPromptTool = 'codex' | 'cursor' | 'claude-code'
+type AssistantConfigFile = 'prompt' | 'config'
+type AssistantConfigResult = { path: string; exists: boolean; content: string }
 
 declare global {
   interface Window {
@@ -22,6 +31,8 @@ declare global {
       selectDirectory(): Promise<string | undefined>
       scanDirectories(rootPath: string, directoryName: string): Promise<CleanupTarget[]>
       deleteDirectories(ids: string[]): Promise<DeleteResult[]>
+      selectImageOutputDirectory(): Promise<string | undefined>
+      saveCompressedImages(outputDirectory: string, files: Array<{ name: string; data: ArrayBuffer }>): Promise<{ directory: string; files: string[] }>
     }
     windowControls: {
       minimize(): void
@@ -30,6 +41,7 @@ declare global {
       isMaximized(): Promise<boolean>
     }
     networkTools?: {
+      getLocalIpv4(): Promise<{ lan: LocalIpv4[]; wired: LocalIpv4[] }>
       detectExitIp(): Promise<ExitIpResult>
       diagnose(host: string, port: number, mode: 'tcp' | 'http' | 'https'): Promise<NetworkDiagnosis>
     }
@@ -37,10 +49,29 @@ declare global {
       listListening(): Promise<ListeningProcess[]>
       terminate(pid: number): Promise<{ pid: number }>
     }
+    voltaTools?: {
+      getNodeState(): Promise<VoltaNodeState>
+      installNode(version: string): Promise<VoltaNodeState>
+      pinNode(version: string, directory: string): Promise<{ directory: string; version: string }>
+    }
+    nvmTools?: {
+      getNodeState(): Promise<NvmNodeState>
+      installNode(version: string): Promise<NvmNodeState>
+      useNode(version: string): Promise<NvmNodeState>
+      uninstallNode(version: string): Promise<NvmNodeState>
+    }
+    nodeReleaseTools?: {
+      list(): Promise<NodeRelease[]>
+      installManager(manager: 'volta' | 'nvm'): Promise<VoltaNodeState | NvmNodeState>
+    }
+    assistantConfig?: {
+      read(tool: AssistantPromptTool, file: AssistantConfigFile): Promise<AssistantConfigResult>
+      save(tool: AssistantPromptTool, file: AssistantConfigFile, content: string): Promise<{ path: string }>
+    }
   }
 }
 
-type ToolView = 'portal' | 'cleanup' | 'json' | 'data-lab' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'ports'
+type ToolView = 'portal' | 'cleanup' | 'json' | 'data-lab' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'ports' | 'volta' | 'nvm' | 'assistant-prompt'
 type ToolCategory = 'all' | 'file' | 'data' | 'network' | 'design'
 const props = defineProps<{ tool: ToolView }>()
 const savedDefaultCategory = localStorage.getItem('localforge:default-category')
@@ -66,6 +97,8 @@ const sourceJson = ref('{\n  "hello": "developer toolbox"\n}')
 const resultJson = ref('')
 const jsonIndent = ref(savedIndent === 4 ? 4 : 2)
 const jsonMessage = ref('在本地格式化 JSON，内容不会上传。')
+const localIpv4 = ref<{ lan: LocalIpv4[]; wired: LocalIpv4[] }>({ lan: [], wired: [] })
+const localIpv4Message = ref('正在读取…')
 const exitIp = ref<ExitIpResult>()
 const ipCheckState = ref<'idle' | 'checking' | 'error'>('idle')
 const ipCheckMessage = ref('检测会访问外部 IP 服务，以显示当前应用实际使用的出口地址。')
@@ -82,10 +115,16 @@ const radixMessage = ref('支持 2 至 36 进制的整数转换。')
 const byteSource = ref('1024')
 const byteUnit = ref<'B' | 'KB' | 'MB' | 'GB' | 'TB'>('KB')
 const byteResult = ref<Array<{ unit: string; value: string }>>([])
+const byteMessage = ref('支持任意长度的非负整数，结果保留最多 6 位小数且不会丢失精度。')
 const cryptoAlgorithm = ref<'md5' | 'sha256' | 'sm3' | 'aes' | 'sm4' | 'sm2'>('md5')
 const cryptoOperation = ref<'encrypt' | 'decrypt'>('encrypt')
 const cryptoSource = ref('LocalForge')
 const cryptoKey = ref('')
+const cryptoMode = ref<'ecb' | 'cbc'>('cbc')
+const cryptoIv = ref('')
+const cryptoPadding = ref<'pkcs7' | 'none'>('pkcs7')
+const sm2CipherMode = ref<0 | 1>(1)
+const sm3Key = ref('')
 const cryptoPublicKey = ref('')
 const cryptoPrivateKey = ref('')
 const cryptoResult = ref('')
@@ -111,16 +150,44 @@ const listeningProcesses = ref<ListeningProcess[]>([])
 const portQuery = ref('')
 const portState = ref<'idle' | 'loading' | 'terminating' | 'error'>('idle')
 const portMessage = ref('查询当前 Windows 上正在监听的 TCP 端口。')
+const voltaState = ref<VoltaNodeState>()
+const voltaVersionInput = ref('')
+const voltaProjectPath = ref('')
+const voltaBusy = ref(false)
+const voltaMessage = ref('读取本机 Volta 的 Node 工具链状态。')
+const nvmState = ref<NvmNodeState>()
+const nvmVersionInput = ref('')
+const nvmBusy = ref(false)
+const nvmMessage = ref('读取本机 NVM 的 Node 版本列表。')
+const nodeReleases = ref<NodeRelease[]>([])
+const nodeReleasesBusy = ref(false)
+const showAllNvmReleases = ref(false)
+const nodeReleasesMessage = ref('通过 NVM 命令读取可安装版本。默认仅显示 LTS。')
+const managerInstallBusy = ref<'volta' | 'nvm'>()
+const assistantPromptTool = ref<AssistantPromptTool>('codex')
+const assistantConfigFile = ref<AssistantConfigFile>('prompt')
+const assistantConfigContent = ref('')
+const assistantConfigPath = ref('')
+const assistantConfigExists = ref(false)
+const assistantConfigBusy = ref(false)
+const assistantConfigMessage = ref('选择助手和文件后读取本机全局配置。')
 const colorHex = ref('#16a34a')
 const colorMessage = ref('输入或选择颜色，即可获得不同格式的颜色值。')
 const imageInput = ref<HTMLInputElement>()
+const imageBatchInput = ref<HTMLInputElement>()
+const imageFolderInput = ref<HTMLInputElement>()
 const imagePreviewUrl = ref('')
 const imageFile = ref<File>()
 const imageInfo = ref<{ width: number; height: number }>()
 const imageMessage = ref('选择一张本地图片后，可预览并导出 PNG 或 JPEG。')
 const imageCrop = ref({ x: 0, y: 0, width: 0, height: 0 })
-const imageOutputType = ref<'image/png' | 'image/jpeg' | 'image/webp' | 'image/svg+xml'>('image/png')
+const imageOutputType = ref<'original' | 'image/png' | 'image/jpeg' | 'image/webp' | 'image/svg+xml'>('original')
 const imageQuality = ref(82)
+const imageScale = ref(100)
+const compressedImage = ref<{ url: string; blob: Blob; format: string }>()
+const imageCompressing = ref(false)
+const imageBatch = ref<BatchImage[]>([])
+const imageBatchMessage = ref('可选择多张图片或一个图片文件夹，压缩后将统一导出到新文件夹。')
 const backgroundTolerance = ref(36)
 const imageSampleColor = ref('')
 const imageProcessing = ref(false)
@@ -133,6 +200,9 @@ const filteredListeningProcesses = computed(() => {
   if (!query) return listeningProcesses.value
   return listeningProcesses.value.filter((process) => `${process.port} ${process.name} ${process.pid} ${process.address}`.toLowerCase().includes(query))
 })
+const visibleNodeReleases = computed(() => showAllNvmReleases.value
+  ? nodeReleases.value
+  : nodeReleases.value.filter((release) => release.channel === 'LTS'))
 const successfulDeletes = computed(() => deleteResults.value.filter((item) => item.success).length)
 const categories: Array<{ id: ToolCategory; label: string }> = [
   { id: 'all', label: '全部工具' },
@@ -152,11 +222,14 @@ const portalTools: Array<{ id: Exclude<ToolView, 'portal'>; category: Exclude<To
   { id: 'diff', category: 'data', title: '文本差异对比', description: '逐行比较两段文本，快速查看新增、删除和未变内容。', state: '数据工具' },
   { id: 'convert', category: 'data', title: '配置格式转换', description: '在 JSON、YAML、TOML 与 XML 之间本地转换。', state: '数据工具' },
   { id: 'color', category: 'design', title: '颜色转换器', description: '在 HEX、RGB 与 HSL 之间转换，并一键复制颜色值。', state: '设计工具' },
-  { id: 'image', category: 'design', title: '图片工具', description: '本地预览图片、查看尺寸与体积，并导出 PNG 或 JPEG。', state: '设计工具' },
+  { id: 'image', category: 'design', title: 'TinyPNG 图片压缩', description: '在本地压缩 PNG、JPG 与 WebP，并直观看到节省的文件体积。', state: '设计工具' },
   { id: 'qrcode', category: 'design', title: '二维码工具', description: '在本地生成二维码，并识别图片中的二维码内容。', state: '设计工具' },
   { id: 'ports', category: 'network', title: '端口与进程管理', description: '查看本机监听端口，并按需结束关联进程。', state: '网络工具' },
   { id: 'ip-check', category: 'network', title: 'IP 与代理检测', description: '检测当前出口公网 IP，确认代理或 VPN 是否实际生效。', state: '网络工具' },
-  { id: 'network-diagnosis', category: 'network', title: '网络诊断', description: 'DNS 解析与 TCP 端口连通性检查。', state: '网络工具' }
+  { id: 'network-diagnosis', category: 'network', title: '网络诊断', description: 'DNS 解析与 TCP 端口连通性检查。', state: '网络工具' },
+  { id: 'volta', category: 'data', title: 'Volta Node 管理', description: '查看、安装默认 Node 版本，或为项目固定版本。', state: '数据工具' },
+  { id: 'nvm', category: 'data', title: 'NVM Node 管理', description: '查看可下载版本、安装、切换或移除 NVM Node。', state: '数据工具' },
+  { id: 'assistant-prompt', category: 'data', title: 'AI 提示词与配置', description: '编辑 Codex、Cursor、Claude Code 的全局提示词和配置文件。', state: '数据工具' }
 ]
 const visiblePortalTools = computed(() => activeCategory.value === 'all'
   ? portalTools
@@ -172,6 +245,58 @@ const toggleMaximizeWindow = async () => {
   isMaximized.value = await window.windowControls.isMaximized()
 }
 const closeWindow = () => window.windowControls.close()
+const assistantToolLabel = computed(() => ({ codex: 'Codex', cursor: 'Cursor', 'claude-code': 'Claude Code' })[assistantPromptTool.value])
+const assistantFileLabel = computed(() => assistantConfigFile.value === 'prompt' ? '全局提示词' : '配置文件')
+const loadAssistantConfig = async () => {
+  if (!window.assistantConfig) { assistantConfigMessage.value = '请重启应用以加载 AI 配置组件'; return }
+  assistantConfigBusy.value = true
+  try {
+    const result = await window.assistantConfig.read(assistantPromptTool.value, assistantConfigFile.value)
+    assistantConfigContent.value = result.content
+    assistantConfigPath.value = result.path
+    assistantConfigExists.value = result.exists
+    assistantConfigMessage.value = result.exists ? `已读取 ${assistantFileLabel.value}。` : '文件尚不存在；保存后会在对应全局目录创建。'
+  } catch (error) {
+    assistantConfigMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    assistantConfigBusy.value = false
+  }
+}
+const saveAssistantConfig = async () => {
+  if (!window.assistantConfig) return
+  const action = assistantConfigExists.value ? '覆盖保存' : '创建并保存'
+  if (!window.confirm(`确认${action} ${assistantToolLabel.value} 的${assistantFileLabel.value}吗？`)) return
+  assistantConfigBusy.value = true
+  try {
+    const result = await window.assistantConfig.save(assistantPromptTool.value, assistantConfigFile.value, assistantConfigContent.value)
+    assistantConfigPath.value = result.path
+    assistantConfigExists.value = true
+    assistantConfigMessage.value = `已保存到 ${result.path}`
+    ElMessage.success({ message: '已保存全局配置', duration: 1_800 })
+  } catch (error) {
+    assistantConfigMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    assistantConfigBusy.value = false
+  }
+}
+const refreshLocalIpv4 = async () => {
+  if (!window.networkTools?.getLocalIpv4) {
+    localIpv4Message.value = '请重启应用以加载网络组件'
+    return
+  }
+  try {
+    localIpv4.value = await window.networkTools.getLocalIpv4()
+    localIpv4Message.value = localIpv4.value.lan.length ? '' : '未发现活动网卡'
+  } catch {
+    localIpv4.value = { lan: [], wired: [] }
+    localIpv4Message.value = '本机 IPv4 读取失败'
+  }
+}
+const copyLocalIpv4 = async (address: string) => {
+  await navigator.clipboard.writeText(address)
+  ElMessage.success({ message: `已复制 ${address}`, duration: 1_800 })
+}
+void refreshLocalIpv4()
 const saveSettings = () => {
   localStorage.setItem('localforge:default-category', defaultCategory.value)
   localStorage.setItem('localforge:json-indent', String(jsonIndent.value))
@@ -179,6 +304,7 @@ const saveSettings = () => {
 }
 watch(() => props.tool, (tool) => {
   activeTool.value = tool
+  if (tool === 'assistant-prompt') void loadAssistantConfig()
 }, { immediate: true })
 watch(() => route.query.category, (category) => {
   activeCategory.value = category === 'file' || category === 'data' || category === 'network' || category === 'design' || category === 'all' ? category : initialCategory
@@ -322,6 +448,18 @@ const textStats = computed(() => {
     bytes: new TextEncoder().encode(text).length
   }
 })
+const copyTextStats = async () => {
+  const stats = textStats.value
+  await navigator.clipboard.writeText([
+    `字符数: ${stats.characters}`,
+    `非空白字符: ${stats.noWhitespace}`,
+    `汉字: ${stats.chinese}`,
+    `英文词: ${stats.words}`,
+    `数字: ${stats.numbers}`,
+    `行数: ${stats.lines}`,
+    `UTF-8 字节: ${stats.bytes}`
+  ].join('\n'))
+}
 const parseRadixInteger = (source: string, radix: number): bigint => {
   const normalized = source.trim().toLowerCase()
   if (!normalized) throw new Error('请输入整数')
@@ -343,11 +481,38 @@ const convertRadix = () => {
     radixMessage.value = `已转换为 ${radixTo.value} 进制。`
   } catch (error) { radixMessage.value = `转换失败：${error instanceof Error ? error.message : String(error)}` }
 }
+const copyRadixResult = async () => {
+  if (!radixResult.value) return
+  await navigator.clipboard.writeText(radixResult.value)
+  radixMessage.value = '转换结果已复制到剪贴板。'
+}
+const byteUnits = ['B', 'KB', 'MB', 'GB', 'TB'] as const
+const formatByteValue = (bytes: bigint, unitIndex: number) => {
+  const divisor = 1024n ** BigInt(unitIndex)
+  const whole = bytes / divisor
+  const remainder = bytes % divisor
+  if (!remainder) return whole.toString()
+  const fraction = (remainder * 1_000_000n / divisor).toString().padStart(6, '0').replace(/0+$/, '')
+  return `${whole}.${fraction}`
+}
 const convertBytes = () => {
-  const input = Number(byteSource.value)
-  if (!Number.isFinite(input) || input < 0) { byteResult.value = []; return }
-  const bytes = input * 1024 ** ['B', 'KB', 'MB', 'GB', 'TB'].indexOf(byteUnit.value)
-  byteResult.value = ['B', 'KB', 'MB', 'GB', 'TB'].map((unit, index) => ({ unit, value: `${(bytes / 1024 ** index).toLocaleString(undefined, { maximumFractionDigits: 6 })}` }))
+  try {
+    if (!/^\d+$/.test(byteSource.value.trim())) throw new Error('请输入非负整数；小数会造成字节精度歧义。')
+    const bytes = BigInt(byteSource.value.trim()) * 1024n ** BigInt(byteUnits.indexOf(byteUnit.value))
+    byteResult.value = byteUnits.map((unit, index) => ({ unit, value: formatByteValue(bytes, index) }))
+    byteMessage.value = '已按 1 KB = 1024 B 精确换算。'
+  } catch (error) {
+    byteResult.value = []
+    byteMessage.value = error instanceof Error ? error.message : '无法转换输入数值。'
+  }
+}
+const copyByteValue = async (item: { unit: string; value: string }) => {
+  await navigator.clipboard.writeText(`${item.value} ${item.unit}`)
+  byteMessage.value = `${item.unit} 数值已复制到剪贴板。`
+}
+const copyByteResults = async () => {
+  await navigator.clipboard.writeText(byteResult.value.map((item) => `${item.unit}: ${item.value}`).join('\n'))
+  byteMessage.value = '全部换算结果已复制到剪贴板。'
 }
 convertBytes()
 const generateSm2Keys = () => {
@@ -356,26 +521,35 @@ const generateSm2Keys = () => {
   cryptoPublicKey.value = pair.publicKey
   cryptoMessage.value = '已在本机生成 SM2 密钥对；请妥善保存私钥，离开此页面后不会保留。'
 }
+const parseHexWordArray = (value: string, label: string, lengths: number[]) => {
+  const normalized = value.trim()
+  if (!lengths.includes(normalized.length) || !/^[\da-f]+$/i.test(normalized)) throw new Error(`${label}必须是 ${lengths.join('、')} 位十六进制字符`)
+  return CryptoJS.enc.Hex.parse(normalized)
+}
 const runCrypto = () => {
   try {
     if (!cryptoSource.value) throw new Error('请输入待处理内容')
     if (cryptoAlgorithm.value === 'md5') cryptoResult.value = CryptoJS.MD5(cryptoSource.value).toString()
     else if (cryptoAlgorithm.value === 'sha256') cryptoResult.value = CryptoJS.SHA256(cryptoSource.value).toString()
-    else if (cryptoAlgorithm.value === 'sm3') cryptoResult.value = sm3(cryptoSource.value)
+    else if (cryptoAlgorithm.value === 'sm3') cryptoResult.value = sm3Key.value.trim() ? sm3(cryptoSource.value, { key: sm3Key.value.trim() }) : sm3(cryptoSource.value)
     else if (cryptoAlgorithm.value === 'aes') {
-      if (!cryptoKey.value) throw new Error('请输入 AES 口令')
-      cryptoResult.value = cryptoOperation.value === 'encrypt' ? CryptoJS.AES.encrypt(cryptoSource.value, cryptoKey.value).toString() : CryptoJS.AES.decrypt(cryptoSource.value, cryptoKey.value).toString(CryptoJS.enc.Utf8)
-      if (cryptoOperation.value === 'decrypt' && !cryptoResult.value) throw new Error('解密失败：请确认密文与口令')
+      const key = parseHexWordArray(cryptoKey.value, 'AES 密钥', [32, 48, 64])
+      const iv = cryptoMode.value === 'cbc' ? parseHexWordArray(cryptoIv.value, 'AES IV', [32]) : undefined
+      const options = { mode: cryptoMode.value === 'cbc' ? CryptoJS.mode.CBC : CryptoJS.mode.ECB, padding: cryptoPadding.value === 'pkcs7' ? CryptoJS.pad.Pkcs7 : CryptoJS.pad.NoPadding, ...(iv ? { iv } : {}) }
+      cryptoResult.value = cryptoOperation.value === 'encrypt' ? CryptoJS.AES.encrypt(cryptoSource.value, key, options).toString() : CryptoJS.AES.decrypt(cryptoSource.value, key, options).toString(CryptoJS.enc.Utf8)
+      if (cryptoOperation.value === 'decrypt' && !cryptoResult.value) throw new Error('解密失败：请确认密文、密钥和参数')
     } else if (cryptoAlgorithm.value === 'sm4') {
       if (!/^[\da-f]{32}$/i.test(cryptoKey.value)) throw new Error('SM4 密钥必须是 32 位十六进制字符')
-      cryptoResult.value = cryptoOperation.value === 'encrypt' ? sm4.encrypt(cryptoSource.value, cryptoKey.value) : sm4.decrypt(cryptoSource.value, cryptoKey.value)
+      if (cryptoMode.value === 'cbc' && !/^[\da-f]{32}$/i.test(cryptoIv.value)) throw new Error('SM4 CBC IV 必须是 32 位十六进制字符')
+      const options = { mode: cryptoMode.value, padding: cryptoPadding.value === 'pkcs7' ? 'pkcs#7' : 'none', ...(cryptoMode.value === 'cbc' ? { iv: cryptoIv.value } : {}) }
+      cryptoResult.value = cryptoOperation.value === 'encrypt' ? sm4.encrypt(cryptoSource.value, cryptoKey.value, options) : sm4.decrypt(cryptoSource.value, cryptoKey.value, options)
     } else {
       if (cryptoOperation.value === 'encrypt') {
         if (!cryptoPublicKey.value) throw new Error('请输入 SM2 公钥')
-        cryptoResult.value = sm2.doEncrypt(cryptoSource.value, cryptoPublicKey.value, 1)
+        cryptoResult.value = sm2.doEncrypt(cryptoSource.value, cryptoPublicKey.value, sm2CipherMode.value)
       } else {
         if (!cryptoPrivateKey.value) throw new Error('请输入 SM2 私钥')
-        cryptoResult.value = sm2.doDecrypt(cryptoSource.value, cryptoPrivateKey.value, 1)
+        cryptoResult.value = sm2.doDecrypt(cryptoSource.value, cryptoPrivateKey.value, sm2CipherMode.value)
       }
     }
     cryptoMessage.value = cryptoAlgorithm.value === 'md5' || cryptoAlgorithm.value === 'sha256' || cryptoAlgorithm.value === 'sm3' ? '摘要已生成。摘要不可逆，不能用于解密。' : `${cryptoOperation.value === 'encrypt' ? '加密' : '解密'}完成。`
@@ -506,6 +680,26 @@ const copyColor = async (value: string) => {
 }
 const openImagePicker = () => imageInput.value?.click()
 const formatBytes = (bytes: number) => bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(bytes < 1024 ? 0 : 1)} KB` : `${(bytes / 1024 / 1024).toFixed(2)} MB`
+const clearCompressedImage = () => {
+  if (compressedImage.value?.url) URL.revokeObjectURL(compressedImage.value.url)
+  compressedImage.value = undefined
+}
+const imageExtension = (format: string) => format === 'image/jpeg' ? 'jpg' : format === 'image/svg+xml' ? 'svg' : format.split('/')[1]
+const isSupportedImageFile = (file: File) => file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(file.name)
+const resolveOutputFormat = (file?: File) => {
+  if (imageOutputType.value !== 'original') return imageOutputType.value
+  return file?.type === 'image/jpeg' || file?.type === 'image/png' || file?.type === 'image/webp' || file?.type === 'image/svg+xml' ? file.type : 'image/png'
+}
+const scaleCanvas = (canvas: HTMLCanvasElement) => {
+  if (imageScale.value >= 100) return canvas
+  const scaled = document.createElement('canvas')
+  scaled.width = Math.max(1, Math.round(canvas.width * imageScale.value / 100))
+  scaled.height = Math.max(1, Math.round(canvas.height * imageScale.value / 100))
+  const context = scaled.getContext('2d')
+  if (!context) throw new Error('无法缩放图片')
+  context.drawImage(canvas, 0, 0, scaled.width, scaled.height)
+  return scaled
+}
 const loadCanvasImage = (url: string): Promise<HTMLImageElement> => new Promise((resolveImage, rejectImage) => {
   const image = new Image()
   image.onload = () => resolveImage(image)
@@ -533,13 +727,15 @@ const updatePreviewFromCanvas = (canvas: HTMLCanvasElement, message: string) => 
   imageInfo.value = { width: canvas.width, height: canvas.height }
   imageCrop.value = { x: 0, y: 0, width: canvas.width, height: canvas.height }
   imageMessage.value = message
+  clearCompressedImage()
 }
 const loadImage = (file: File | undefined) => {
-  if (!file || !file.type.startsWith('image/')) {
+  if (!file || !isSupportedImageFile(file)) {
     imageMessage.value = '请选择 PNG、JPEG、WebP、GIF、BMP 或 SVG 图片文件。'
     return
   }
   if (imagePreviewUrl.value) URL.revokeObjectURL(imagePreviewUrl.value)
+  clearCompressedImage()
   imageFile.value = file
   imagePreviewUrl.value = URL.createObjectURL(file)
   const image = new Image()
@@ -549,25 +745,126 @@ const loadImage = (file: File | undefined) => {
     imageSampleColor.value = ''
     imageMessage.value = '图片已加载，所有处理仅在本机完成。'
   }
+  image.onerror = () => {
+    imagePreviewUrl.value = ''
+    imageFile.value = undefined
+    imageInfo.value = undefined
+    imageMessage.value = '图片无法加载。请确认文件未损坏，并使用 PNG、JPG、WebP、GIF、BMP 或 SVG 格式。'
+  }
   image.src = imagePreviewUrl.value
 }
-const onImageSelected = (event: Event) => loadImage((event.target as HTMLInputElement).files?.[0])
-const onImageDropped = (event: DragEvent) => loadImage(event.dataTransfer?.files[0])
-const exportImage = async () => {
+const onImageSelected = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  loadImage(input.files?.[0])
+  input.value = ''
+}
+const onImageDropped = (event: DragEvent) => {
+  const files = event.dataTransfer?.files
+  if (!files?.length) return
+  if (files.length > 1) loadImageBatch(files)
+  else loadImage(files[0])
+}
+const loadImageBatch = (files: FileList | File[]) => {
+  const images = Array.from(files).filter(isSupportedImageFile)
+  if (!images.length) {
+    imageBatchMessage.value = '没有识别到可处理的图片文件。'
+    return
+  }
+  imageBatch.value = images.map((file, index) => ({ id: `${file.name}-${file.lastModified}-${index}`, file, status: 'waiting' }))
+  loadImage(images[0])
+  imageBatchMessage.value = `已加入 ${images.length} 张图片。可调整格式和质量后批量压缩。`
+}
+const onImageBatchSelected = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  if (input.files) loadImageBatch(input.files)
+  input.value = ''
+}
+const onImageFolderSelected = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  if (input.files) loadImageBatch(input.files)
+  input.value = ''
+}
+const renderFileCanvas = async (file: File) => {
+  const url = URL.createObjectURL(file)
   try {
-    const canvas = await renderImageCanvas()
-    const extension = imageOutputType.value === 'image/jpeg' ? 'jpg' : imageOutputType.value === 'image/svg+xml' ? 'svg' : imageOutputType.value.split('/')[1]
-    const link = document.createElement('a')
-    if (imageOutputType.value === 'image/svg+xml') {
-      const png = canvas.toDataURL('image/png')
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}" viewBox="0 0 ${canvas.width} ${canvas.height}"><image href="${png}" width="100%" height="100%"/></svg>`
-      link.href = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }))
-      link.addEventListener('click', () => setTimeout(() => URL.revokeObjectURL(link.href), 0), { once: true })
-    } else link.href = canvas.toDataURL(imageOutputType.value, imageOutputType.value === 'image/png' ? undefined : imageQuality.value / 100)
-    link.download = `${imageFile.value?.name.replace(/\.[^.]+$/, '') ?? 'image'}.${extension}`
-    link.click()
-    imageMessage.value = `已导出 ${extension.toUpperCase()} 图片。`
-  } catch (error) { imageMessage.value = error instanceof Error ? error.message : String(error) }
+    const image = await loadCanvasImage(url)
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('无法创建图片画布')
+    context.drawImage(image, 0, 0)
+    return scaleCanvas(canvas)
+  } finally { URL.revokeObjectURL(url) }
+}
+const englishOutputName = (file: File, index: number) => {
+  const extension = imageExtension(resolveOutputFormat(file))
+  const sourceStem = file.name.replace(/\.[^.]+$/, '')
+  const asciiStem = sourceStem.normalize('NFKD').replace(/[^\x20-\x7E]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase()
+  const hasNonAscii = /[^\x00-\x7F]/.test(sourceStem)
+  return `${hasNonAscii || !asciiStem ? 'image' : asciiStem}-${String(index + 1).padStart(3, '0')}.${extension}`
+}
+const setBatchItem = (id: string, update: Partial<BatchImage>) => {
+  imageBatch.value = imageBatch.value.map((item) => item.id === id ? { ...item, ...update } : item)
+}
+const compressBatch = async () => {
+  if (!imageBatch.value.length) {
+    imageBatchMessage.value = '请先选择多张图片或一个图片文件夹。'
+    return
+  }
+  const outputDirectory = await window.developerTools.selectImageOutputDirectory()
+  if (!outputDirectory) return
+  imageCompressing.value = true
+  const outputFiles: Array<{ name: string; data: ArrayBuffer }> = []
+  try {
+    for (const [index, item] of imageBatch.value.entries()) {
+      setBatchItem(item.id, { status: 'compressing', error: undefined })
+      try {
+        const blob = await encodeCanvas(await renderFileCanvas(item.file), resolveOutputFormat(item.file))
+        const outputName = englishOutputName(item.file, index)
+        outputFiles.push({ name: outputName, data: await blob.arrayBuffer() })
+        setBatchItem(item.id, { status: 'ready', resultSize: blob.size, outputName })
+      } catch (error) {
+        setBatchItem(item.id, { status: 'failed', error: error instanceof Error ? error.message : String(error) })
+      }
+    }
+    if (!outputFiles.length) throw new Error('没有图片成功压缩，未创建导出文件夹。')
+    const result = await window.developerTools.saveCompressedImages(outputDirectory, outputFiles)
+    const failures = imageBatch.value.filter((item) => item.status === 'failed').length
+    imageBatchMessage.value = `已导出 ${result.files.length} 张图片至：${result.directory}${failures ? `；${failures} 张处理失败。` : '。'}`
+  } catch (error) {
+    imageBatchMessage.value = error instanceof Error ? error.message : String(error)
+  } finally { imageCompressing.value = false }
+}
+const encodeCanvas = (canvas: HTMLCanvasElement, format = resolveOutputFormat(imageFile.value)) => new Promise<Blob>((resolve, reject) => {
+  if (format === 'image/svg+xml') {
+    const png = canvas.toDataURL('image/png')
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}" viewBox="0 0 ${canvas.width} ${canvas.height}"><image href="${png}" width="100%" height="100%"/></svg>`
+    resolve(new Blob([svg], { type: 'image/svg+xml' }))
+    return
+  }
+  canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('图片编码失败，请更换格式后重试。')), format, format === 'image/png' ? undefined : imageQuality.value / 100)
+})
+const compressImage = async () => {
+  try {
+    imageCompressing.value = true
+    const canvas = scaleCanvas(await renderImageCanvas())
+    const format = resolveOutputFormat(imageFile.value)
+    const blob = await encodeCanvas(canvas, format)
+    clearCompressedImage()
+    compressedImage.value = { url: URL.createObjectURL(blob), blob, format }
+    const change = imageFile.value ? Math.round((1 - blob.size / imageFile.value.size) * 100) : 0
+    imageMessage.value = change >= 0 ? `压缩完成，节省 ${change}% 空间。` : '已完成重新编码；当前设置的输出文件比原图更大，可降低质量或改用 WebP。'
+  } catch (error) { imageMessage.value = error instanceof Error ? error.message : String(error) } finally { imageCompressing.value = false }
+}
+const downloadCompressedImage = () => {
+  if (!compressedImage.value) return
+  const extension = imageExtension(compressedImage.value.format)
+  const link = document.createElement('a')
+  link.href = compressedImage.value.url
+  link.download = `${imageFile.value?.name.replace(/\.[^.]+$/, '') ?? 'image'}-tinied.${extension}`
+  link.click()
+  imageMessage.value = `已下载压缩后的 ${extension.toUpperCase()} 图片。`
 }
 const applyCrop = async () => {
   try { updatePreviewFromCanvas(await renderImageCanvas(), '裁剪已应用。') } catch (error) { imageMessage.value = error instanceof Error ? error.message : String(error) }
@@ -635,6 +932,11 @@ const checkExitIp = async () => {
     ipCheckMessage.value = error instanceof Error ? error.message : String(error)
   }
 }
+const copyExitIp = async () => {
+  if (!exitIp.value) return
+  await navigator.clipboard.writeText(exitIp.value.ip)
+  ipCheckMessage.value = '出口 IP 已复制到剪贴板。'
+}
 const runNetworkDiagnosis = async () => {
   if (!window.networkTools) return
   networkDiagnosisState.value = 'checking'
@@ -648,6 +950,20 @@ const runNetworkDiagnosis = async () => {
     networkDiagnosisState.value = 'error'
     networkDiagnosisMessage.value = error instanceof Error ? error.message : String(error)
   }
+}
+const copyNetworkDiagnosis = async () => {
+  if (!networkDiagnosis.value) return
+  const result = networkDiagnosis.value
+  await navigator.clipboard.writeText([
+    `主机: ${result.host}`,
+    `端口: ${result.port}`,
+    `DNS: ${result.addresses.join(', ') || '未返回地址'}`,
+    `IPv4: ${result.ipv4.join(', ') || '未返回记录'}`,
+    `IPv6: ${result.ipv6.join(', ') || '未返回记录'}`,
+    `TCP: ${result.tcp.reachable ? `连接成功${result.tcp.latencyMs === undefined ? '' : ` (${result.tcp.latencyMs} ms)`}` : `无法连接 (${result.tcp.error ?? '未知原因'})`}`,
+    result.http ? `HTTP: ${result.http.reachable ? `${result.http.status} ${result.http.statusText ?? ''} (${result.http.latencyMs} ms)` : `请求失败 (${result.http.error ?? '未知原因'})`}` : ''
+  ].filter(Boolean).join('\n'))
+  networkDiagnosisMessage.value = '诊断结果已复制到剪贴板。'
 }
 const refreshListeningProcesses = async () => {
   if (!window.processTools) return
@@ -675,6 +991,151 @@ const terminateProcess = async (process: ListeningProcess) => {
     portMessage.value = error instanceof Error ? error.message : String(error)
   }
 }
+
+const refreshVoltaState = async () => {
+  if (!window.voltaTools) return
+  voltaBusy.value = true
+  try {
+    voltaState.value = await window.voltaTools.getNodeState()
+    voltaMessage.value = voltaState.value.installed
+      ? '已读取 Volta 工具链。项目锁定的版本会优先于这里的默认版本。'
+      : `未检测到可用的 Volta：${voltaState.value.error ?? '请确认 volta 已加入 PATH。'}`
+  } catch (error) {
+    voltaMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    voltaBusy.value = false
+  }
+}
+
+const installVoltaNode = async (version?: string) => {
+  if (!window.voltaTools) return
+  const target = (version ?? voltaVersionInput.value).trim()
+  if (!target) { voltaMessage.value = '请输入要安装的 Node 版本。'; return }
+  if (!window.confirm(`Volta 将下载 Node@${target} 并把它设为默认版本，是否继续？`)) return
+  voltaBusy.value = true
+  try {
+    voltaState.value = await window.voltaTools.installNode(target)
+    voltaVersionInput.value = ''
+    voltaMessage.value = `Node@${voltaState.value.defaultVersion ?? target} 已安装，并已设为 Volta 默认版本。`
+  } catch (error) {
+    voltaMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    voltaBusy.value = false
+  }
+}
+
+const chooseVoltaProject = async () => {
+  const selected = await window.developerTools.selectDirectory()
+  if (selected) voltaProjectPath.value = selected
+}
+
+const pinVoltaNode = async () => {
+  if (!window.voltaTools) return
+  const version = voltaVersionInput.value.trim() || voltaState.value?.defaultVersion
+  if (!version) { voltaMessage.value = '请先输入要固定的 Node 版本。'; return }
+  if (!voltaProjectPath.value) { voltaMessage.value = '请先选择项目目录。'; return }
+  if (!window.confirm(`将修改该项目的 package.json，固定 Node@${version}。是否继续？`)) return
+  voltaBusy.value = true
+  try {
+    const result = await window.voltaTools.pinNode(version, voltaProjectPath.value)
+    voltaMessage.value = `已在 ${result.directory} 的 package.json 中固定 Node@${result.version}。`
+  } catch (error) {
+    voltaMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    voltaBusy.value = false
+  }
+}
+
+const refreshNvmState = async () => {
+  if (!window.nvmTools) return
+  nvmBusy.value = true
+  try {
+    nvmState.value = await window.nvmTools.getNodeState()
+    nvmMessage.value = nvmState.value.installed
+      ? '已读取 NVM 管理的 Node 版本。切换后会影响系统当前启用的 Node。'
+      : `未检测到可用的 NVM：${nvmState.value.error ?? '请确认 nvm 已加入 PATH。'}`
+  } catch (error) {
+    nvmMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    nvmBusy.value = false
+  }
+}
+
+const installNvmNode = async (requestedVersion?: string) => {
+  if (!window.nvmTools) return
+  const version = (requestedVersion ?? nvmVersionInput.value).trim()
+  if (!version) { nvmMessage.value = '请输入要安装的 Node 版本。'; return }
+  if (!window.confirm(`NVM 将下载 Node@${version}，是否继续？`)) return
+  nvmBusy.value = true
+  try {
+    nvmState.value = await window.nvmTools.installNode(version)
+    nvmVersionInput.value = ''
+    nvmMessage.value = `Node@${version} 已由 NVM 安装。`
+  } catch (error) {
+    nvmMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    nvmBusy.value = false
+  }
+}
+
+const refreshNodeReleases = async () => {
+  if (!window.nodeReleaseTools) return
+  nodeReleasesBusy.value = true
+  try {
+    nodeReleases.value = await window.nodeReleaseTools.list()
+    nodeReleasesMessage.value = `已通过 nvm list available 加载 ${nodeReleases.value.length} 个可安装版本。`
+  } catch (error) {
+    nodeReleasesMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    nodeReleasesBusy.value = false
+  }
+}
+
+const installVersionManager = async (manager: 'volta' | 'nvm') => {
+  if (!window.nodeReleaseTools) return
+  const label = manager === 'volta' ? 'Volta' : 'NVM for Windows'
+  if (!window.confirm(`将通过 winget 安装 ${label}。安装程序可能要求管理员授权，是否继续？`)) return
+  managerInstallBusy.value = manager
+  try {
+    await window.nodeReleaseTools.installManager(manager)
+    await Promise.all([refreshVoltaState(), refreshNvmState()])
+    nodeReleasesMessage.value = `${label} 安装命令已完成；如界面仍未识别，请重启 LocalForge。`
+  } catch (error) {
+    nodeReleasesMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    managerInstallBusy.value = undefined
+  }
+}
+
+const useNvmNode = async (version: string) => {
+  if (!window.nvmTools || !window.confirm(`将系统当前 Node 切换到 NVM 的 ${version}，是否继续？`)) return
+  nvmBusy.value = true
+  try {
+    nvmState.value = await window.nvmTools.useNode(version)
+    nvmMessage.value = `当前 Node 已切换为 ${nvmState.value.currentVersion ?? version}。`
+  } catch (error) {
+    nvmMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    nvmBusy.value = false
+  }
+}
+
+const uninstallNvmNode = async (version: string) => {
+  if (!window.nvmTools || !window.confirm(`将永久移除 NVM 管理的 Node@${version}，是否继续？`)) return
+  nvmBusy.value = true
+  try {
+    nvmState.value = await window.nvmTools.uninstallNode(version)
+    nvmMessage.value = `Node@${version} 已从 NVM 移除。`
+  } catch (error) {
+    nvmMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    nvmBusy.value = false
+  }
+}
+
+void refreshVoltaState()
+void refreshNvmState()
+void refreshNodeReleases()
 </script>
 
 <template>
@@ -693,11 +1154,22 @@ const terminateProcess = async (process: ListeningProcess) => {
         <nav aria-label="工具列表">
           <button v-for="category in categories" :key="category.id" :class="{ active: activeTool === 'portal' && activeCategory === category.id }" @click="showPortal(category.id)"><SvgIcon class="sidebar-icon" :name="category.id === 'all' ? 'dashboard' : category.id === 'file' ? 'folder' : category.id === 'data' ? 'code' : category.id === 'design' ? 'palette' : 'globe'" />{{ category.label }}</button>
         </nav>
+        <section class="sidebar-local-ip" aria-label="本机 IPv4 地址">
+          <div>
+            <small>局域网 IPv4</small>
+            <strong v-for="item in localIpv4.lan" :key="`lan-${item.name}-${item.address}`" :title="`${item.name} · 点击复制`" @click="copyLocalIpv4(item.address)">{{ item.address }}</strong>
+            <span v-if="!localIpv4.lan.length">{{ localIpv4Message }}</span>
+          </div>
+          <div>
+            <small>网线 IPv4</small>
+            <strong v-for="item in localIpv4.wired" :key="`wired-${item.name}-${item.address}`" :title="`${item.name} · 点击复制`" @click="copyLocalIpv4(item.address)">{{ item.address }}</strong>
+            <span v-if="!localIpv4.wired.length">未连接网线</span>
+          </div>
+        </section>
         <div class="sidebar-actions">
           <button type="button" title="打开系统监控" aria-label="打开系统监控" @click="openMonitor"><SvgIcon name="monitor"/><span>系统监控</span></button>
           <button class="settings-action" type="button" title="打开设置" aria-label="打开设置" @click="settingsOpen = true"><SvgIcon name="settings"/><span>设置</span></button>
         </div>
-        <p class="sidebar-note">LOCAL · SAFE · FAST</p>
       </aside>
 
       <section class="toolbox-content">
@@ -705,11 +1177,27 @@ const terminateProcess = async (process: ListeningProcess) => {
         <header class="toolbox-heading"><p>LOCALFORGE / TOOL PORTAL</p><h2>{{ portalTitle }}</h2><span>选择一项工具开始工作，所有处理均在本机完成。</span></header>
         <section class="portal-list" :aria-label="`${portalTitle}列表`">
           <button v-for="tool in visiblePortalTools" :key="tool.id" class="portal-item" type="button" @click="openTool(tool.id)">
-            <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'json' || tool.id === 'data-lab' || tool.id === 'stats' || tool.id === 'radix' || tool.id === 'bytes' || tool.id === 'crypto' || tool.id === 'diff' || tool.id === 'convert' ? 'code' : tool.id === 'color' ? 'palette' : tool.id === 'image' || tool.id === 'qrcode' ? 'image' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
+            <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'json' || tool.id === 'data-lab' || tool.id === 'stats' || tool.id === 'radix' || tool.id === 'bytes' || tool.id === 'crypto' || tool.id === 'diff' || tool.id === 'convert' || tool.id === 'volta' || tool.id === 'nvm' || tool.id === 'assistant-prompt' ? 'code' : tool.id === 'color' ? 'palette' : tool.id === 'image' || tool.id === 'qrcode' ? 'image' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
             <span class="portal-copy"><em>{{ tool.state }}</em><strong>{{ tool.title }}</strong><small>{{ tool.description }}</small></span>
             <b>›</b>
           </button>
           <p v-if="!visiblePortalTools.length" class="portal-empty">该分类暂时没有可用工具。</p>
+        </section>
+      </template>
+
+      <template v-else-if="activeTool === 'assistant-prompt'">
+        <header class="toolbox-heading"><div><p>数据工具 / AI CODING ASSISTANTS</p><h2>AI 提示词与配置</h2><span>在本机直接维护 Codex、Cursor 和 Claude Code 的全局提示词与配置文件。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="assistant-config-card">
+          <div class="assistant-config-controls">
+            <label>AI 编程助手<select v-model="assistantPromptTool" :disabled="assistantConfigBusy" @change="loadAssistantConfig"><option value="codex">Codex</option><option value="cursor">Cursor</option><option value="claude-code">Claude Code</option></select></label>
+            <label>编辑内容<select v-model="assistantConfigFile" :disabled="assistantConfigBusy" @change="loadAssistantConfig"><option value="prompt">全局提示词</option><option value="config">配置文件</option></select></label>
+            <button :disabled="assistantConfigBusy" @click="loadAssistantConfig">{{ assistantConfigBusy ? '读取中…' : '重新读取' }}</button>
+            <button class="primary" :disabled="assistantConfigBusy" @click="saveAssistantConfig">{{ assistantConfigBusy ? '处理中…' : '保存到全局' }}</button>
+          </div>
+          <p class="tool-message" :class="{ error: assistantConfigMessage.includes('失败') || assistantConfigMessage.includes('无效') }">{{ assistantConfigMessage }}</p>
+          <p class="assistant-config-path"><small>文件位置</small><code>{{ assistantConfigPath || '读取后显示' }}</code></p>
+          <label class="assistant-config-editor"><span>{{ assistantToolLabel }} · {{ assistantFileLabel }}</span><textarea v-model="assistantConfigContent" spellcheck="false" :placeholder="assistantConfigFile === 'prompt' ? '输入适用于所有项目的指令…' : '输入配置文件内容…'"></textarea></label>
+          <p class="assistant-config-note">保存会直接覆盖该全局文件；配置文件请保持对应格式有效。Cursor 的全局提示词保存为 <code>~/.cursor/rules/global.mdc</code>。</p>
         </section>
       </template>
 
@@ -748,22 +1236,22 @@ const terminateProcess = async (process: ListeningProcess) => {
 
       <template v-else-if="activeTool === 'stats'">
         <header class="toolbox-heading"><div><p>数据工具 / TEXT</p><h2>字数统计</h2><span>实时统计文本字符、词数、行数和 UTF-8 字节长度。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
-        <section class="stats-layout"><label>待统计文本<textarea v-model="statsSource" spellcheck="false" placeholder="输入或粘贴文本"></textarea></label><section class="stats-grid"><div><small>字符数</small><strong>{{ textStats.characters }}</strong></div><div><small>非空白字符</small><strong>{{ textStats.noWhitespace }}</strong></div><div><small>汉字</small><strong>{{ textStats.chinese }}</strong></div><div><small>英文词</small><strong>{{ textStats.words }}</strong></div><div><small>数字</small><strong>{{ textStats.numbers }}</strong></div><div><small>行数</small><strong>{{ textStats.lines }}</strong></div><div><small>UTF-8 字节</small><strong>{{ textStats.bytes }}</strong></div></section></section>
+        <section class="stats-layout"><label>待统计文本<textarea v-model="statsSource" spellcheck="false" placeholder="输入或粘贴文本"></textarea></label><section class="stats-grid"><div><small>字符数</small><strong>{{ textStats.characters }}</strong></div><div><small>非空白字符</small><strong>{{ textStats.noWhitespace }}</strong></div><div><small>汉字</small><strong>{{ textStats.chinese }}</strong></div><div><small>英文词</small><strong>{{ textStats.words }}</strong></div><div><small>数字</small><strong>{{ textStats.numbers }}</strong></div><div><small>行数</small><strong>{{ textStats.lines }}</strong></div><div><small>UTF-8 字节</small><strong>{{ textStats.bytes }}</strong></div><button type="button" @click="copyTextStats">复制统计</button></section></section>
       </template>
 
       <template v-else-if="activeTool === 'radix'">
         <header class="toolbox-heading"><div><p>数据工具 / RADIX</p><h2>进制转换</h2><span>支持 2 至 36 进制的任意精度整数，不受 JavaScript Number 精度限制。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
-        <section class="converter-card"><label>输入数值<input v-model="radixSource" spellcheck="false"></label><label>原进制<input v-model.number="radixFrom" type="number" min="2" max="36"></label><label>目标进制<input v-model.number="radixTo" type="number" min="2" max="36"></label><button class="primary" @click="convertRadix">转换</button><p class="tool-message">{{ radixMessage }}</p><label class="converter-result">转换结果<textarea v-model="radixResult" readonly></textarea></label></section>
+        <section class="converter-card"><label>输入数值<input v-model="radixSource" spellcheck="false"></label><label>原进制<input v-model.number="radixFrom" type="number" min="2" max="36"></label><label>目标进制<input v-model.number="radixTo" type="number" min="2" max="36"></label><button class="primary" @click="convertRadix">转换</button><button :disabled="!radixResult" @click="copyRadixResult">复制结果</button><p class="tool-message">{{ radixMessage }}</p><label class="converter-result">转换结果<textarea v-model="radixResult" readonly></textarea></label></section>
       </template>
 
       <template v-else-if="activeTool === 'bytes'">
-        <header class="toolbox-heading"><div><p>数据工具 / BYTES</p><h2>字节单位转换</h2><span>采用 1 KB = 1024 B 的二进制换算方式。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
-        <section class="converter-card byte-card"><label>数值<input v-model="byteSource" type="number" min="0" @input="convertBytes"></label><label>输入单位<select v-model="byteUnit" @change="convertBytes"><option>B</option><option>KB</option><option>MB</option><option>GB</option><option>TB</option></select></label><section class="byte-results"><div v-for="item in byteResult" :key="item.unit"><small>{{ item.unit }}</small><strong>{{ item.value }}</strong></div></section></section>
+        <header class="toolbox-heading"><div><p>数据工具 / BYTES</p><h2>字节单位转换</h2><span>采用 1 KB = 1024 B 的二进制换算方式，支持任意长度整数。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="converter-card byte-card"><label>数值<input v-model.trim="byteSource" inputmode="numeric" spellcheck="false" placeholder="例如 1048576" @input="convertBytes"></label><label>输入单位<select v-model="byteUnit" @change="convertBytes"><option>B</option><option>KB</option><option>MB</option><option>GB</option><option>TB</option></select></label><button :disabled="!byteResult.length" @click="copyByteResults">复制全部结果</button><p class="tool-message" :class="{ error: !byteResult.length }">{{ byteMessage }}</p><section v-if="byteResult.length" class="byte-results"><div v-for="item in byteResult" :key="item.unit"><small>{{ item.unit }}</small><strong :title="item.value">{{ item.value }}</strong><button type="button" @click="copyByteValue(item)">复制</button></div></section></section>
       </template>
 
       <template v-else-if="activeTool === 'crypto'">
         <header class="toolbox-heading"><div><p>数据工具 / CRYPTO</p><h2>加解密工作台</h2><span>处理仅在本机完成。不要在不可信设备或页面中输入生产密钥。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
-        <section class="crypto-card"><div class="crypto-actions"><label>算法<select v-model="cryptoAlgorithm"><option value="md5">MD5 摘要</option><option value="sha256">SHA-256 摘要</option><option value="sm3">SM3 摘要</option><option value="aes">AES</option><option value="sm4">SM4</option><option value="sm2">SM2</option></select></label><label v-if="!['md5', 'sha256', 'sm3'].includes(cryptoAlgorithm)">操作<select v-model="cryptoOperation"><option value="encrypt">加密</option><option value="decrypt">解密</option></select></label></div><label>输入<textarea v-model="cryptoSource" spellcheck="false" placeholder="输入明文、密文或待计算摘要的内容"></textarea></label><template v-if="cryptoAlgorithm === 'aes' || cryptoAlgorithm === 'sm4'"><label>{{ cryptoAlgorithm === 'sm4' ? 'SM4 密钥（32 位十六进制）' : 'AES 口令' }}<input v-model="cryptoKey" :type="cryptoAlgorithm === 'aes' ? 'password' : 'text'"></label></template><template v-else-if="cryptoAlgorithm === 'sm2'"><div class="sm2-key-actions"><button @click="generateSm2Keys">生成 SM2 密钥对</button></div><label>SM2 公钥（加密使用）<textarea v-model="cryptoPublicKey" spellcheck="false"></textarea></label><label>SM2 私钥（解密使用）<textarea v-model="cryptoPrivateKey" spellcheck="false"></textarea></label></template><div class="crypto-run"><button class="primary" @click="runCrypto">{{ ['md5', 'sha256', 'sm3'].includes(cryptoAlgorithm) ? '生成摘要' : cryptoOperation === 'encrypt' ? '加密' : '解密' }}</button><button :disabled="!cryptoResult" @click="copyCryptoResult">复制结果</button></div><p class="tool-message">{{ cryptoMessage }}</p><label>结果<textarea v-model="cryptoResult" readonly spellcheck="false"></textarea></label></section>
+        <section class="crypto-card"><div class="crypto-actions"><label>算法<select v-model="cryptoAlgorithm"><option value="md5">MD5 摘要</option><option value="sha256">SHA-256 摘要</option><option value="sm3">SM3 摘要</option><option value="aes">AES</option><option value="sm4">SM4</option><option value="sm2">SM2</option></select></label><label v-if="!['md5', 'sha256', 'sm3'].includes(cryptoAlgorithm)">操作<select v-model="cryptoOperation"><option value="encrypt">加密</option><option value="decrypt">解密</option></select></label></div><label>输入<textarea v-model="cryptoSource" spellcheck="false" placeholder="输入明文、密文或待计算摘要的内容"></textarea></label><template v-if="cryptoAlgorithm === 'aes' || cryptoAlgorithm === 'sm4'"><label>{{ cryptoAlgorithm === 'sm4' ? 'SM4 密钥（32 位十六进制）' : 'AES 密钥（32 / 48 / 64 位十六进制）' }}<input v-model="cryptoKey" type="password" spellcheck="false"></label><label>分组模式<select v-model="cryptoMode"><option value="cbc">CBC</option><option value="ecb">ECB</option></select></label><label v-if="cryptoMode === 'cbc'">初始化向量 IV（32 位十六进制）<input v-model="cryptoIv" type="password" spellcheck="false"></label><label>填充方式<select v-model="cryptoPadding"><option value="pkcs7">PKCS#7</option><option value="none">无填充（明文需为 16 字节倍数）</option></select></label></template><template v-else-if="cryptoAlgorithm === 'sm3'"><label>HMAC 密钥（可选，十六进制）<input v-model="sm3Key" type="password" spellcheck="false"></label></template><template v-else-if="cryptoAlgorithm === 'sm2'"><div class="sm2-key-actions"><button @click="generateSm2Keys">生成 SM2 密钥对</button><label>密文排列<select v-model.number="sm2CipherMode"><option :value="1">C1C3C2（推荐）</option><option :value="0">C1C2C3</option></select></label></div><p class="crypto-note">SM2 是椭圆曲线公钥加密，不使用 IV 或分组填充；互操作时需确保双方采用相同密文排列。</p><label>SM2 公钥（加密使用，支持压缩或非压缩格式）<textarea v-model="cryptoPublicKey" spellcheck="false"></textarea></label><label>SM2 私钥（解密使用）<textarea v-model="cryptoPrivateKey" spellcheck="false"></textarea></label></template><div class="crypto-run"><button class="primary" @click="runCrypto">{{ ['md5', 'sha256', 'sm3'].includes(cryptoAlgorithm) ? '生成摘要' : cryptoOperation === 'encrypt' ? '加密' : '解密' }}</button><button :disabled="!cryptoResult" @click="copyCryptoResult">复制结果</button></div><p class="tool-message">{{ cryptoMessage }}</p><label>结果<textarea v-model="cryptoResult" readonly spellcheck="false"></textarea></label></section>
       </template>
 
       <template v-else-if="activeTool === 'diff'">
@@ -796,11 +1284,14 @@ const terminateProcess = async (process: ListeningProcess) => {
       </template>
 
       <template v-else-if="activeTool === 'image'">
-        <header class="toolbox-heading"><div><p>设计工具 / 图片</p><h2>本地图片工作台</h2><span>取色、去背景、压缩、格式互换与裁剪，所有处理均在本机进行。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <header class="toolbox-heading"><div><p>设计工具 / TINYPNG STYLE</p><h2>TinyPNG 图片压缩</h2><span>压缩、裁剪和转换图片；图片始终留在本机，不会上传到任何服务器。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
         <input ref="imageInput" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml" @change="onImageSelected">
+        <input ref="imageBatchInput" class="visually-hidden" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml" @change="onImageBatchSelected">
+        <input ref="imageFolderInput" class="visually-hidden" type="file" webkitdirectory directory multiple accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml" @change="onImageFolderSelected">
+        <section class="batch-import-card"><div><small>BATCH COMPRESS</small><strong>批量压缩并导出文件夹</strong><span>中文文件名会自动改为英文安全名，例如 <code>image-001.webp</code>。</span></div><button type="button" @click="imageBatchInput?.click()">选择多张图片</button><button class="primary" type="button" @click="imageFolderInput?.click()">选择图片文件夹</button></section>
         <section class="image-dropzone" :class="{ 'has-image': imagePreviewUrl }" @click="openImagePicker" @dragover.prevent @drop.prevent="onImageDropped">
           <img v-if="imagePreviewUrl" :src="imagePreviewUrl" :alt="imageFile?.name ?? '图片预览'" title="点击图片吸附颜色" @click.stop="sampleImageColor">
-          <div v-else><SvgIcon name="image" /><strong>选择或拖入图片</strong><span>支持 PNG、JPEG、WebP、GIF、BMP 与 SVG</span></div>
+          <div v-else><SvgIcon name="image" /><strong>拖入图片开始压缩</strong><span>支持 PNG、JPEG、WebP、GIF、BMP 与 SVG · 单次处理一张</span></div>
         </section>
         <p class="tool-message">{{ imageMessage }}</p>
         <section v-if="imageFile && imageInfo" class="image-details">
@@ -810,7 +1301,15 @@ const terminateProcess = async (process: ListeningProcess) => {
         <section v-if="imageFile && imageInfo" class="image-workbench">
           <div><h3>裁剪</h3><p>按像素设定裁剪区域，点击应用后将以裁剪结果继续编辑。</p><label>X <input v-model.number="imageCrop.x" type="number" min="0" :max="Math.max(0, imageInfo.width - 1)"></label><label>Y <input v-model.number="imageCrop.y" type="number" min="0" :max="Math.max(0, imageInfo.height - 1)"></label><label>宽 <input v-model.number="imageCrop.width" type="number" min="1" :max="imageInfo.width - imageCrop.x"></label><label>高 <input v-model.number="imageCrop.height" type="number" min="1" :max="imageInfo.height - imageCrop.y"></label><button @click="applyCrop">应用裁剪</button></div>
           <div><h3>背景透明化</h3><p>根据图片四角颜色移除接近的背景，适合白底、纯色背景。</p><label>容差 <input v-model.number="backgroundTolerance" type="range" min="8" max="100"><output>{{ backgroundTolerance }}</output></label><button :disabled="imageProcessing" @click="removeBackground">{{ imageProcessing ? '处理中…' : '去除背景' }}</button></div>
-          <div><h3>压缩与格式</h3><p>使用浏览器原生编码器进行有损压缩，类似 TinyPNG 的核心效果。</p><label>格式 <select v-model="imageOutputType"><option value="image/png">PNG</option><option value="image/jpeg">JPG</option><option value="image/webp">WebP</option><option value="image/svg+xml">SVG（嵌入图片）</option></select></label><label>质量 <input v-model.number="imageQuality" type="range" min="20" max="100" :disabled="imageOutputType === 'image/png' || imageOutputType === 'image/svg+xml'"><output>{{ imageQuality }}%</output></label><button class="primary" @click="exportImage">压缩并下载</button></div>
+          <div><h3>压缩与格式</h3><p>批量导出会统一使用以下参数。降低质量或尺寸比例可显著减小体积；SVG 为嵌入图片，并非矢量化。</p><label>格式 <select v-model="imageOutputType" @change="clearCompressedImage"><option value="original">保持原格式</option><option value="image/png">统一 PNG</option><option value="image/jpeg">统一 JPG</option><option value="image/webp">统一 WebP（推荐）</option><option value="image/svg+xml">统一 SVG（嵌入图片）</option></select></label><label>清晰度（JPG/WebP） <input v-model.number="imageQuality" type="range" min="20" max="100" :disabled="imageOutputType === 'image/png' || imageOutputType === 'image/svg+xml'"><output>{{ imageQuality }}%</output></label><label>尺寸比例 <input v-model.number="imageScale" type="range" min="10" max="100" step="5" @change="clearCompressedImage"><output>{{ imageScale }}%</output></label><button class="primary" :disabled="imageCompressing" @click="compressImage">{{ imageCompressing ? '压缩中…' : '开始压缩' }}</button></div>
+        </section>
+        <section v-if="imageBatch.length" class="batch-queue">
+          <header><div><small>待处理队列</small><strong>{{ imageBatch.length }} 张图片</strong></div><button class="primary" :disabled="imageCompressing" @click="compressBatch">{{ imageCompressing ? '正在批量压缩…' : '压缩并导出文件夹' }}</button></header>
+          <p class="tool-message">{{ imageBatchMessage }}</p>
+          <div class="batch-file-list"><div v-for="item in imageBatch" :key="item.id"><span :title="item.file.name">{{ item.file.name }}</span><small>{{ formatBytes(item.file.size) }}</small><strong :class="`batch-${item.status}`">{{ item.status === 'waiting' ? '等待处理' : item.status === 'compressing' ? '压缩中…' : item.status === 'ready' ? `${formatBytes(item.resultSize ?? 0)} · ${item.outputName}` : item.error ?? '处理失败' }}</strong></div></div>
+        </section>
+        <section v-if="compressedImage && imageFile" class="compression-result">
+          <div><small>原始文件</small><strong>{{ formatBytes(imageFile.size) }}</strong></div><i aria-hidden="true">→</i><div><small>压缩结果</small><strong>{{ formatBytes(compressedImage.blob.size) }}</strong></div><div><small>空间变化</small><strong :class="{ 'file-larger': compressedImage.blob.size > imageFile.size }">{{ compressedImage.blob.size <= imageFile.size ? `节省 ${Math.round((1 - compressedImage.blob.size / imageFile.size) * 100)}%` : `增加 ${Math.round((compressedImage.blob.size / imageFile.size - 1) * 100)}%` }}</strong></div><button class="primary" @click="downloadCompressedImage">下载图片</button>
         </section>
       </template>
 
@@ -818,6 +1317,23 @@ const terminateProcess = async (process: ListeningProcess) => {
         <header class="toolbox-heading"><div><p>设计工具 / QR CODE</p><h2>二维码工具</h2><span>生成二维码或从本地图片中识别内容，处理过程不经过网络。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
         <input ref="qrInput" class="visually-hidden" type="file" accept="image/*" @change="scanQr(($event.target as HTMLInputElement).files?.[0])">
         <section class="qr-card"><label>二维码内容<textarea v-model="qrText" spellcheck="false" placeholder="输入文本或 URL"></textarea></label><div class="qr-actions"><button class="primary" @click="generateQr">生成二维码</button><button @click="qrInput?.click()">识别本地图片</button><button :disabled="!qrImage" @click="downloadQr">下载 PNG</button></div><p class="tool-message">{{ qrMessage }}</p><img v-if="qrImage" :src="qrImage" alt="生成的二维码"></section>
+      </template>
+
+      <template v-else-if="activeTool === 'volta'">
+        <header class="toolbox-heading"><div><p>数据工具 / VOLTA</p><h2>Node.js 版本管理</h2><span>这是 Volta 的可视化入口：界面直接调用本机 Volta，不替代它的版本管理机制。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="volta-overview"><div class="volta-summary"><small>VOLTA</small><strong>{{ voltaState?.installed ? `v${voltaState.voltaVersion}` : '未检测' }}</strong><span>{{ voltaState?.installed ? '本机命令行工具链' : '请确认已安装并加入 PATH' }}</span></div><div class="volta-summary"><small>默认 NODE</small><strong>{{ voltaState?.defaultVersion ? `v${voltaState.defaultVersion}` : '—' }}</strong><span>全局默认；项目固定版本优先</span></div><div class="volta-summary"><small>当前 NODE</small><strong>{{ voltaState?.currentVersion ? `v${voltaState.currentVersion}` : '—' }}</strong><span>当前 LocalForge 工作目录的解析结果</span></div></section>
+        <section v-if="!voltaState?.installed" class="manager-installs"><span>未检测到 Volta，可通过 winget 安装：</span><button :disabled="Boolean(managerInstallBusy)" @click="installVersionManager('volta')">{{ managerInstallBusy === 'volta' ? '正在安装 Volta…' : '安装 Volta' }}</button></section>
+        <section class="volta-actions"><label>Node 版本<input v-model.trim="voltaVersionInput" placeholder="例如 22、22.18.0、lts 或 latest" @keyup.enter="installVoltaNode()"></label><button class="primary" :disabled="voltaBusy" @click="installVoltaNode()">{{ voltaBusy ? '处理中…' : '安装并设为默认' }}</button><button :disabled="voltaBusy" @click="refreshVoltaState">刷新状态</button><p class="tool-message" :class="{ error: voltaState && !voltaState.installed }">{{ voltaMessage }}</p></section>
+        <section v-if="voltaState?.installed" class="results-card volta-versions"><header><div><strong>Volta Node 运行时</strong><small>直接读取 <code>volta list all</code>；该命令只列出本机 Volta 工具链。</small></div></header><div v-if="voltaState.versions.length" class="volta-version-list"><div v-for="item in voltaState.versions" :key="item.version" class="volta-version-row"><code>v{{ item.version }}</code><span v-if="item.isDefault">默认版本</span><button :disabled="voltaBusy || item.isDefault" @click="installVoltaNode(item.version)">{{ item.isDefault ? '正在使用' : '设为默认' }}</button></div></div><p v-else class="empty-state">Volta 未返回 Node 运行时。</p></section>
+        <section class="volta-pin"><div><strong>为项目固定 Node 版本</strong><span>会由 Volta 修改所选项目的 <code>package.json</code>，适合需要提交团队版本约束的项目。</span></div><input :value="voltaProjectPath" readonly placeholder="选择项目目录"><button @click="chooseVoltaProject">选择目录</button><button class="primary" :disabled="voltaBusy || !voltaProjectPath" @click="pinVoltaNode">固定到项目</button></section>
+      </template>
+
+      <template v-else-if="activeTool === 'nvm'">
+        <header class="toolbox-heading"><div><p>数据工具 / NVM</p><h2>NVM Node.js 管理</h2><span>直接调用 NVM for Windows；切换版本会改变系统当前启用的 Node。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="nvm-overview"><div><small>NVM</small><strong>{{ nvmState?.installed ? `v${nvmState.nvmVersion}` : '未检测' }}</strong><span>{{ nvmState?.installed ? '本机 NVM for Windows' : '请确认已安装并加入 PATH' }}</span></div><div><small>当前 NODE</small><strong>{{ nvmState?.currentVersion ? `v${nvmState.currentVersion}` : '—' }}</strong><span>由 <code>nvm use</code> 管理</span></div></section>
+        <section class="release-catalog"><header><div><p>NVM LIST AVAILABLE</p><h3>可下载版本</h3><span>直接执行 <code>nvm list available</code>，默认仅显示长期支持版本。</span></div><button :disabled="nodeReleasesBusy" @click="refreshNodeReleases">{{ nodeReleasesBusy ? '读取中…' : '刷新列表' }}</button></header><p class="tool-message">{{ nodeReleasesMessage }}</p><label class="release-filter"><input v-model="showAllNvmReleases" type="checkbox"> 显示所有版本 <small>默认仅显示 LTS（{{ nodeReleases.filter((release) => release.channel === 'LTS').length }} 个）</small></label><div v-if="visibleNodeReleases.length" class="release-list"><div v-for="release in visibleNodeReleases" :key="`${release.channel}-${release.version}`" class="release-row"><code>v{{ release.version }}</code><span :class="`release-channel-${release.channel.toLowerCase().replace(/\s+/g, '-')}`">{{ release.channel }}</span><small>{{ release.channel === 'LTS' ? '长期支持版本' : 'NVM 可安装版本' }}</small><button class="primary" :disabled="nvmBusy || !nvmState?.installed" @click="installNvmNode(release.version)">NVM 安装</button></div></div><p v-else-if="nodeReleases.length" class="empty-state">NVM 没有返回 LTS 版本；开启“显示所有版本”查看完整列表。</p><div v-if="!nvmState?.installed" class="manager-installs"><span>未检测到 NVM，可通过 winget 安装：</span><button :disabled="Boolean(managerInstallBusy)" @click="installVersionManager('nvm')">{{ managerInstallBusy === 'nvm' ? '正在安装 NVM…' : '安装 NVM for Windows' }}</button></div></section>
+        <section class="nvm-actions"><label>Node 版本<input v-model.trim="nvmVersionInput" placeholder="例如 20.19.0 或 22" @keyup.enter="installNvmNode"></label><button class="primary" :disabled="nvmBusy" @click="installNvmNode">{{ nvmBusy ? '处理中…' : '安装版本' }}</button><button :disabled="nvmBusy" @click="refreshNvmState">刷新状态</button><p class="tool-message" :class="{ error: nvmState && !nvmState.installed }">{{ nvmMessage }}</p></section>
+        <section v-if="nvmState?.installed" class="results-card nvm-versions"><div v-if="nvmState.versions.length" class="nvm-version-list"><div v-for="item in nvmState.versions" :key="item.version" class="nvm-version-row"><code>v{{ item.version }}</code><span v-if="item.isCurrent">当前使用</span><button :disabled="nvmBusy || item.isCurrent" @click="useNvmNode(item.version)">{{ item.isCurrent ? '正在使用' : '切换到此版本' }}</button><button class="danger" :disabled="nvmBusy || item.isCurrent" @click="uninstallNvmNode(item.version)">移除</button></div></div><p v-else class="empty-state">NVM 中暂未安装 Node 版本。</p></section>
       </template>
 
       <template v-else-if="activeTool === 'ports'">
@@ -831,13 +1347,13 @@ const terminateProcess = async (process: ListeningProcess) => {
         <section class="ip-check-card">
           <div class="ip-check-intro"><i aria-hidden="true">◎</i><div><strong>当前网络出口</strong><span>启用系统代理或 VPN 后，检测结果应显示代理服务器的出口地址。</span></div><button class="primary" type="button" :disabled="ipCheckState === 'checking'" @click="checkExitIp">{{ ipCheckState === 'checking' ? '检测中…' : '检测出口 IP' }}</button></div>
           <p class="tool-message" :class="{ error: ipCheckState === 'error' }">{{ ipCheckMessage }}</p>
-          <dl v-if="exitIp" class="ip-result"><div class="ip-result-primary"><dt>出口 IP</dt><dd>{{ exitIp.ip }}</dd></div><div><dt>国家或地区</dt><dd>{{ exitIp.country || '未提供' }}</dd></div><div><dt>城市</dt><dd>{{ exitIp.city || '未提供' }}</dd></div><div><dt>网络服务商</dt><dd>{{ exitIp.isp || '未提供' }}</dd></div><div><dt>时区</dt><dd>{{ exitIp.timezone || '未提供' }}</dd></div></dl>
+          <dl v-if="exitIp" class="ip-result"><div class="ip-result-primary"><dt>出口 IP</dt><dd>{{ exitIp.ip }}</dd><button type="button" @click="copyExitIp">复制 IP</button></div><div><dt>国家或地区</dt><dd>{{ exitIp.country || '未提供' }}</dd></div><div><dt>城市</dt><dd>{{ exitIp.city || '未提供' }}</dd></div><div><dt>网络服务商</dt><dd>{{ exitIp.isp || '未提供' }}</dd></div><div><dt>时区</dt><dd>{{ exitIp.timezone || '未提供' }}</dd></div></dl>
         </section>
       </template>
 
       <template v-else-if="activeTool === 'network-diagnosis'">
         <header class="toolbox-heading"><div><p>网络工具 / DNS 与 TCP</p><h2>网络诊断</h2><span>检查域名解析结果，并从本机测试指定 TCP 端口的连通性。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
-        <section class="network-form"><label>域名或 IP<input v-model.trim="networkHost" placeholder="例如 api.example.com"></label><label>端口<input v-model.number="networkPort" type="number" min="1" max="65535"></label><label>探测方式<select v-model="networkMode"><option value="tcp">TCP（Telnet 类）</option><option value="http">HTTP</option><option value="https">HTTPS</option></select></label><button class="primary" :disabled="networkDiagnosisState === 'checking'" @click="runNetworkDiagnosis">{{ networkDiagnosisState === 'checking' ? '诊断中…' : '开始诊断' }}</button></section>
+        <section class="network-form"><label>域名或 IP<input v-model.trim="networkHost" placeholder="例如 api.example.com"></label><label>端口<input v-model.number="networkPort" type="number" min="1" max="65535"></label><label>探测方式<select v-model="networkMode"><option value="tcp">TCP（Telnet 类）</option><option value="http">HTTP</option><option value="https">HTTPS</option></select></label><button class="primary" :disabled="networkDiagnosisState === 'checking'" @click="runNetworkDiagnosis">{{ networkDiagnosisState === 'checking' ? '诊断中…' : '开始诊断' }}</button><button :disabled="!networkDiagnosis" @click="copyNetworkDiagnosis">复制诊断结果</button></section>
         <p class="tool-message" :class="{ error: networkDiagnosisState === 'error' }">{{ networkDiagnosisMessage }}</p>
         <section v-if="networkDiagnosis" class="results-card diagnosis-results"><div><h3>DNS 解析</h3><p>{{ networkDiagnosis.addresses.join(' · ') || '未返回地址' }}</p></div><div><h3>IPv4 记录</h3><p>{{ networkDiagnosis.ipv4.join(' · ') || '未返回记录' }}</p></div><div><h3>IPv6 记录</h3><p>{{ networkDiagnosis.ipv6.join(' · ') || '未返回记录' }}</p></div><div><h3>TCP {{ networkDiagnosis.port }}</h3><p :class="{ 'network-failed': !networkDiagnosis.tcp.reachable }">{{ networkDiagnosis.tcp.reachable ? `连接成功 · ${networkDiagnosis.tcp.latencyMs} ms` : `无法连接 · ${networkDiagnosis.tcp.error}` }}</p></div><div v-if="networkDiagnosis.http"><h3>{{ networkMode.toUpperCase() }} 请求</h3><p :class="{ 'network-failed': !networkDiagnosis.http.reachable }">{{ networkDiagnosis.http.reachable ? `${networkDiagnosis.http.status} ${networkDiagnosis.http.statusText} · ${networkDiagnosis.http.latencyMs} ms` : `请求失败 · ${networkDiagnosis.http.error}` }}</p></div></section>
       </template>

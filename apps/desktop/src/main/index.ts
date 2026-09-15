@@ -1,11 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net as electronNet, screen, Tray } from 'electron'
 import type { HardwareProfile, MetricSnapshot } from '@localforge/shared/metrics'
 import { basename, join, parse, relative, resolve } from 'node:path'
-import { lstat, readdir, rm } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { lookup, resolve4, resolve6 } from 'node:dns/promises'
 import { connect } from 'node:net'
+import { homedir, networkInterfaces } from 'node:os'
 import { collectBaseMetrics } from './collectors/base'
 import { MetricSampler } from './collectors/sampler'
 import { collectNvidiaMetrics } from './collectors/nvidia'
@@ -34,10 +35,52 @@ function trayIconPath(): string {
 }
 
 type ListeningProcess = { protocol: string; address: string; port: number; pid: number; name: string }
+type LocalIpv4 = { name: string; address: string }
+type AssistantConfigTool = 'codex' | 'cursor' | 'claude-code'
+type AssistantConfigFile = 'prompt' | 'config'
 
-function commandOutput(command: string, args: string[]): Promise<string> {
+function assistantConfigPath(tool: AssistantConfigTool, file: AssistantConfigFile): string {
+  const userHome = homedir()
+  const appData = process.env.APPDATA || join(userHome, 'AppData', 'Roaming')
+  const paths: Record<AssistantConfigTool, Record<AssistantConfigFile, string>> = {
+    codex: { prompt: join(userHome, '.codex', 'AGENTS.md'), config: join(userHome, '.codex', 'config.toml') },
+    cursor: { prompt: join(userHome, '.cursor', 'rules', 'global.mdc'), config: join(appData, 'Cursor', 'User', 'settings.json') },
+    'claude-code': { prompt: join(userHome, '.claude', 'CLAUDE.md'), config: join(userHome, '.claude', 'settings.json') }
+  }
+  return paths[tool][file]
+}
+
+function assertAssistantConfigRequest(request: unknown): { tool: AssistantConfigTool; file: AssistantConfigFile; content?: string } {
+  const { tool, file, content } = request as { tool?: unknown; file?: unknown; content?: unknown }
+  if (tool !== 'codex' && tool !== 'cursor' && tool !== 'claude-code') throw new Error('不支持的 AI 编程助手')
+  if (file !== 'prompt' && file !== 'config') throw new Error('不支持的文件类型')
+  if (content !== undefined && typeof content !== 'string') throw new Error('配置内容无效')
+  return { tool, file, content }
+}
+
+function localIpv4Addresses(): { lan: LocalIpv4[]; wired: LocalIpv4[] } {
+  const lan: LocalIpv4[] = []
+  const wired: LocalIpv4[] = []
+  const seen = new Set<string>()
+  for (const [name, entries] of Object.entries(networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      // 某些 Node/Electron 组合会以数字 4 表示地址族；链路本地地址
+      // 也是有效的本机 IPv4，不能因为没有 DHCP 地址而被隐藏。
+      if (String(entry.family) !== 'IPv4' || entry.internal) continue
+      const address = { name, address: entry.address }
+      if (!seen.has(`${name}:${entry.address}`)) {
+        seen.add(`${name}:${entry.address}`)
+        lan.push(address)
+        if (/ethernet|以太网|本地连接/i.test(name)) wired.push(address)
+      }
+    }
+  }
+  return { lan, wired }
+}
+
+function commandOutput(command: string, args: string[], options?: { cwd?: string }): Promise<string> {
   return new Promise((resolveCommand, rejectCommand) => {
-    const child = spawn(command, args, { windowsHide: true })
+    const child = spawn(command, args, { windowsHide: true, ...options })
     let output = ''
     let errorOutput = ''
     child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString() })
@@ -45,6 +88,94 @@ function commandOutput(command: string, args: string[]): Promise<string> {
     child.once('error', rejectCommand)
     child.once('exit', (code) => code === 0 ? resolveCommand(output) : rejectCommand(new Error(errorOutput || `${command} 退出，代码 ${code ?? '未知'}`)))
   })
+}
+
+function voltaVersionFrom(output: string): string | undefined {
+  return output.match(/node@([^\s(]+)/)?.[1]
+}
+
+function assertNodeSpecifier(value: unknown): string {
+  if (typeof value !== 'string') throw new Error('Node 版本参数无效')
+  const specifier = value.trim()
+  if (!/^(?:v?\d+(?:\.\d+){0,2}|latest|lts(?:\/[a-z0-9-]+)?)$/i.test(specifier)) {
+    throw new Error('请输入版本号（例如 22、22.18.0、lts 或 latest）')
+  }
+  return specifier
+}
+
+type NvmAvailableRelease = { version: string; channel: 'CURRENT' | 'LTS' | 'OLD STABLE' | 'OLD UNSTABLE' }
+let nvmAvailableReleaseCache: { expiresAt: number; releases: NvmAvailableRelease[] } | undefined
+
+async function getNvmDownloadableNodeReleases(): Promise<NvmAvailableRelease[]> {
+  if (nvmAvailableReleaseCache && nvmAvailableReleaseCache.expiresAt > Date.now()) return nvmAvailableReleaseCache.releases
+  const output = await commandOutput('nvm', ['list', 'available'])
+  const channels: NvmAvailableRelease['channel'][] = ['CURRENT', 'LTS', 'OLD STABLE', 'OLD UNSTABLE']
+  const releases = output.split(/\r?\n/).flatMap((line) => {
+    if (!line.trim().startsWith('|') || /^\|[-\s|]+\|$/.test(line)) return []
+    const columns = line.split('|').slice(1, -1).map((item) => item.trim())
+    if (columns.some((value) => /CURRENT|LTS|OLD/i.test(value))) return []
+    return columns.flatMap((version, index) => /^\d+\.\d+\.\d+$/.test(version) ? [{ version, channel: channels[index] }] : [])
+  })
+  nvmAvailableReleaseCache = { releases, expiresAt: Date.now() + 15 * 60_000 }
+  return releases
+}
+
+async function installVersionManager(manager: unknown): Promise<void> {
+  if (process.platform !== 'win32') throw new Error('内置安装入口当前仅支持 Windows')
+  const packageId = manager === 'volta' ? 'Volta.Volta' : manager === 'nvm' ? 'CoreyButler.NVMforWindows' : undefined
+  if (!packageId) throw new Error('版本管理工具参数无效')
+  await commandOutput('winget', ['install', '--exact', '--id', packageId, '--accept-package-agreements', '--accept-source-agreements'])
+}
+
+async function getVoltaNodeState(): Promise<{ installed: boolean; voltaVersion?: string; versions: Array<{ version: string; isDefault: boolean }>; defaultVersion?: string; currentVersion?: string; error?: string }> {
+  try {
+    const [voltaVersion, listOutput, defaultOutput, currentOutput] = await Promise.all([
+      commandOutput('volta', ['--version']),
+      commandOutput('volta', ['list', 'all', '--format', 'plain']),
+      commandOutput('volta', ['list', 'node', '--default', '--format', 'plain']).catch(() => ''),
+      commandOutput('volta', ['list', 'node', '--current', '--format', 'plain']).catch(() => '')
+    ])
+    const parsedVersions = Array.from(listOutput.matchAll(/node@([^\s(]+)/g), (match) => ({
+      version: match[1],
+      isDefault: /\(default\)/.test(match[0])
+    }))
+    const versions = Array.from(parsedVersions.reduce((items, item) => {
+      const existing = items.get(item.version)
+      items.set(item.version, { ...item, isDefault: item.isDefault || existing?.isDefault || false })
+      return items
+    }, new Map<string, { version: string; isDefault: boolean }>()).values())
+    const defaultVersion = voltaVersionFrom(defaultOutput) ?? versions.find((item) => item.isDefault)?.version
+    return {
+      installed: true,
+      voltaVersion: voltaVersion.trim(),
+      versions: versions.map((item) => ({ ...item, isDefault: item.isDefault || item.version === defaultVersion })),
+      defaultVersion,
+      currentVersion: voltaVersionFrom(currentOutput)
+    }
+  } catch (error) {
+    return { installed: false, versions: [], error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function getNvmNodeState(): Promise<{ installed: boolean; nvmVersion?: string; versions: Array<{ version: string; isCurrent: boolean }>; currentVersion?: string; error?: string }> {
+  try {
+    const [nvmVersion, listOutput] = await Promise.all([
+      commandOutput('nvm', ['version']),
+      commandOutput('nvm', ['list'])
+    ])
+    const versions = listOutput.split(/\r?\n/).flatMap((line) => {
+      const match = line.match(/^\s*(\*)?\s*v?(\d+(?:\.\d+){0,2})/)
+      return match ? [{ version: match[2], isCurrent: Boolean(match[1]) || /currently using/i.test(line) }] : []
+    })
+    return {
+      installed: true,
+      nvmVersion: nvmVersion.trim(),
+      versions,
+      currentVersion: versions.find((item) => item.isCurrent)?.version
+    }
+  } catch (error) {
+    return { installed: false, versions: [], error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 async function processNameForPid(pid: number): Promise<string> {
@@ -295,6 +426,7 @@ app.whenReady().then(() => {
   })
   ipcMain.on('window:close', (event) => BrowserWindow.fromWebContents(event.sender)?.close())
   ipcMain.handle('window:is-maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false)
+  ipcMain.handle('network:get-local-ipv4', () => localIpv4Addresses())
   ipcMain.handle('network:detect-exit-ip', async () => {
     const response = await electronNet.fetch('https://ipwho.is/', { signal: AbortSignal.timeout(10_000) })
     if (!response.ok) throw new Error(`出口 IP 服务响应异常（${response.status}）`)
@@ -346,6 +478,63 @@ app.whenReady().then(() => {
     if (process.platform !== 'win32') throw new Error('端口进程管理当前仅支持 Windows')
     await commandOutput('taskkill.exe', ['/PID', String(rawPid), '/T', '/F'])
     return { pid: rawPid }
+  })
+
+  ipcMain.handle('volta:get-node-state', () => getVoltaNodeState())
+  ipcMain.handle('volta:install-node', async (_event, rawVersion: unknown) => {
+    const version = assertNodeSpecifier(rawVersion)
+    await commandOutput('volta', ['install', `node@${version}`])
+    return getVoltaNodeState()
+  })
+  ipcMain.handle('volta:pin-node', async (_event, request: unknown) => {
+    const { version, directory } = request as { version?: unknown; directory?: unknown }
+    const normalizedVersion = assertNodeSpecifier(version)
+    if (typeof directory !== 'string' || !directory.trim()) throw new Error('请选择项目目录')
+    const projectDirectory = resolve(directory)
+    const info = await lstat(projectDirectory)
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('请选择一个真实的项目目录')
+    await commandOutput('volta', ['pin', `node@${normalizedVersion}`], { cwd: projectDirectory })
+    return { directory: projectDirectory, version: normalizedVersion }
+  })
+  ipcMain.handle('nvm:get-node-state', () => getNvmNodeState())
+  ipcMain.handle('nvm:install-node', async (_event, rawVersion: unknown) => {
+    const version = assertNodeSpecifier(rawVersion)
+    await commandOutput('nvm', ['install', version])
+    return getNvmNodeState()
+  })
+  ipcMain.handle('nvm:use-node', async (_event, rawVersion: unknown) => {
+    const version = assertNodeSpecifier(rawVersion)
+    await commandOutput('nvm', ['use', version])
+    return getNvmNodeState()
+  })
+  ipcMain.handle('nvm:uninstall-node', async (_event, rawVersion: unknown) => {
+    const version = assertNodeSpecifier(rawVersion)
+    await commandOutput('nvm', ['uninstall', version])
+    return getNvmNodeState()
+  })
+  ipcMain.handle('node-releases:list', () => getNvmDownloadableNodeReleases())
+  ipcMain.handle('version-manager:install', async (_event, manager: unknown) => {
+    await installVersionManager(manager)
+    return manager === 'volta' ? getVoltaNodeState() : getNvmNodeState()
+  })
+
+  ipcMain.handle('assistant-config:read', async (_event, request: unknown) => {
+    const { tool, file } = assertAssistantConfigRequest(request)
+    const path = assistantConfigPath(tool, file)
+    try {
+      return { path, exists: true, content: await readFile(path, 'utf8') }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { path, exists: false, content: '' }
+      throw error
+    }
+  })
+  ipcMain.handle('assistant-config:save', async (_event, request: unknown) => {
+    const { tool, file, content } = assertAssistantConfigRequest(request)
+    if (content === undefined) throw new Error('配置内容无效')
+    const path = assistantConfigPath(tool, file)
+    await mkdir(parse(path).dir, { recursive: true })
+    await writeFile(path, content, 'utf8')
+    return { path }
   })
 
   ipcMain.handle('toolbox:select-directory', async () => {
@@ -401,6 +590,32 @@ app.whenReady().then(() => {
       }
     }
     return results
+  })
+  ipcMain.handle('image:select-output-directory', async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'], title: '选择图片导出位置' })
+    return result.canceled ? undefined : result.filePaths[0]
+  })
+  ipcMain.handle('image:save-compressed-images', async (_event, request: unknown) => {
+    const { outputDirectory, files } = request as { outputDirectory?: unknown; files?: unknown }
+    if (typeof outputDirectory !== 'string' || !Array.isArray(files) || !files.length) throw new Error('导出参数无效')
+    const targetRoot = resolve(outputDirectory)
+    const targetInfo = await lstat(targetRoot)
+    if (!targetInfo.isDirectory() || targetInfo.isSymbolicLink()) throw new Error('请选择真实的导出文件夹')
+    const batchDirectory = join(targetRoot, `tinypng-output-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}-${randomUUID().slice(0, 8)}`)
+    await mkdir(batchDirectory, { recursive: false })
+    const saved: string[] = []
+    for (const file of files) {
+      if (!file || typeof file !== 'object') throw new Error('图片数据无效')
+      const { name, data } = file as { name?: unknown; data?: unknown }
+      if (typeof name !== 'string' || !(data instanceof ArrayBuffer)) throw new Error('图片数据无效')
+      const safeName = basename(name)
+      if (!/^[a-z0-9][a-z0-9._-]*$/i.test(safeName)) throw new Error('导出文件名无效')
+      const outputPath = resolve(batchDirectory, safeName)
+      if (relative(batchDirectory, outputPath).startsWith('..')) throw new Error('导出路径无效')
+      await writeFile(outputPath, Buffer.from(data))
+      saved.push(outputPath)
+    }
+    return { directory: batchDirectory, files: saved }
   })
 
   tray = new Tray(nativeImage.createFromPath(trayIconPath()).resize({ width: 32, height: 32 }))

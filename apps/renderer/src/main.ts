@@ -3,6 +3,7 @@ import App from './App.vue'
 import StatusBar from './StatusBar.vue'
 import TrendPage from './TrendPage.vue'
 import { router } from './router'
+import 'element-plus/dist/index.css'
 import 'virtual:svg-icons-register'
 import './styles.css'
 
