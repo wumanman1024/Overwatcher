@@ -68,6 +68,12 @@ declare global {
       read(tool: AssistantPromptTool, file: AssistantConfigFile): Promise<AssistantConfigResult>
       save(tool: AssistantPromptTool, file: AssistantConfigFile, content: string): Promise<{ path: string }>
     }
+    screenColorPicker?: {
+      pick(): Promise<string>
+      preview(point: { x: number; y: number }): Promise<{ color: string; preview: string }>
+      choose(point: { x: number; y: number }): void
+      cancel(): void
+    }
   }
 }
 
@@ -192,7 +198,7 @@ const imageBatchMessage = ref('可选择多张图片或一个图片文件夹，�
 const backgroundTolerance = ref(36)
 const imageSampleColor = ref('')
 const imageProcessing = ref(false)
-const eyeDropperSupported = 'EyeDropper' in window
+const screenColorPickerSupported = Boolean(window.screenColorPicker)
 
 const isBusy = computed(() => scanState.value !== 'idle')
 const allSelected = computed(() => targets.value.length > 0 && selectedIds.value.length === targets.value.length)
@@ -921,9 +927,8 @@ const sampleImageColor = async (event: MouseEvent) => {
 }
 const pickScreenColor = async () => {
   try {
-    const EyeDropper = (window as Window & { EyeDropper?: new () => { open(): Promise<{ sRGBHex: string }> } }).EyeDropper
-    if (!EyeDropper) throw new Error('当前 Electron 版本不支持系统屏幕取色。')
-    imageSampleColor.value = (await new EyeDropper().open()).sRGBHex.toUpperCase()
+    if (!window.screenColorPicker) throw new Error('屏幕取色组件未加载，请完全退出并重新启动 LocalForge 后重试。')
+    imageSampleColor.value = await window.screenColorPicker.pick()
     await navigator.clipboard.writeText(imageSampleColor.value)
     imageMessage.value = `已吸附并复制 ${imageSampleColor.value}。`
   } catch (error) { if (error instanceof Error && error.name !== 'AbortError') imageMessage.value = error.message }
@@ -1359,8 +1364,8 @@ void refreshNodeReleases()
       </template>
 
       <template v-else-if="activeTool === 'screen-color'">
-        <header class="toolbox-heading"><div><p>设计工具 / COLOR PICKER</p><h2>屏幕取色</h2><span>从屏幕任意位置吸取颜色，并自动复制 HEX 值。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
-        <section class="color-card"><div class="color-preview" :style="{ background: imageSampleColor || '#eef2ef' }"></div><label>当前颜色<input :value="imageSampleColor" readonly placeholder="点击开始取色"></label><button class="primary" :disabled="!eyeDropperSupported" @click="pickScreenColor">开始取色</button><p class="tool-message">{{ eyeDropperSupported ? '点击后选择屏幕任意位置，颜色会自动复制到剪贴板。' : '当前 Electron 版本不支持系统屏幕取色。' }}</p></section>
+        <header class="toolbox-heading"><div><p>设计工具 / COLOR PICKER</p><h2>屏幕取色</h2><span>覆盖所有显示器，鼠标离开应用窗口后仍可继续取色。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header>
+        <section class="color-card"><div class="color-preview" :style="{ background: imageSampleColor || '#eef2ef' }"></div><label>当前颜色<input :value="imageSampleColor" readonly placeholder="点击开始取色"></label><button class="screen-color-start" :disabled="!screenColorPickerSupported" @click="pickScreenColor"><b>⌖</b><span>开始取色</span></button><p class="tool-message">{{ screenColorPickerSupported ? '点击后可在任意显示器上选择颜色；右键取消，结果会自动复制。' : '屏幕取色组件未加载，请完全退出并重新启动 LocalForge。' }}</p></section>
       </template>
 
       <template v-else-if="activeTool === 'qrcode'">

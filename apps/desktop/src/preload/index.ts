@@ -71,3 +71,10 @@ contextBridge.exposeInMainWorld('windowControls', {
   close: () => ipcRenderer.send('window:close'),
   isMaximized: () => ipcRenderer.invoke('window:is-maximized')
 })
+
+contextBridge.exposeInMainWorld('screenColorPicker', {
+  pick: () => ipcRenderer.invoke('screen-color:pick'),
+  preview: (point: { x: number; y: number }) => ipcRenderer.invoke('screen-color:preview', point),
+  choose: (point: { x: number; y: number }) => ipcRenderer.send('screen-color:choose', point),
+  cancel: () => ipcRenderer.send('screen-color:cancel')
+})

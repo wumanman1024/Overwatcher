@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net as electronNet, screen, Tray } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeImage, net as electronNet, screen, Tray } from 'electron'
 import type { HardwareProfile, MetricSnapshot } from '@localforge/shared/metrics'
 import { basename, join, parse, relative, resolve } from 'node:path'
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
@@ -38,6 +38,12 @@ type ListeningProcess = { protocol: string; address: string; port: number; pid: 
 type LocalIpv4 = { name: string; address: string }
 type AssistantConfigTool = 'codex' | 'cursor' | 'claude-code'
 type AssistantConfigFile = 'prompt' | 'config'
+type ScreenColorPickerSession = {
+  sourceWindow: BrowserWindow
+  overlayWindows: BrowserWindow[]
+  resolve: (color: string) => void
+  reject: (error: Error) => void
+}
 
 function assistantConfigPath(tool: AssistantConfigTool, file: AssistantConfigFile): string {
   const userHome = homedir()
@@ -314,6 +320,47 @@ function createToolboxWindow(): BrowserWindow {
   return window
 }
 
+function createScreenColorPickerWindow(display: Electron.Display): BrowserWindow {
+  const { x, y, width, height } = display.bounds
+  const window = new BrowserWindow({
+    x, y, width, height, show: false, frame: false, transparent: true, resizable: false, movable: false,
+    alwaysOnTop: true, skipTaskbar: true, hasShadow: false,
+    webPreferences: { preload: join(__dirname, '../preload/index.cjs'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
+  })
+  window.setAlwaysOnTop(true, 'screen-saver')
+  window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  const query = { surface: 'screen-color-picker', displayId: String(display.id) }
+  if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query).toString()}`)
+  else void window.loadFile(join(__dirname, '../renderer/index.html'), { query })
+  return window
+}
+
+async function readScreenColor(point: Electron.Point): Promise<{ color: string; preview: string }> {
+  const display = screen.getDisplayNearestPoint(point)
+  const thumbnailSize = {
+    width: Math.max(1, Math.round(display.bounds.width * display.scaleFactor)),
+    height: Math.max(1, Math.round(display.bounds.height * display.scaleFactor))
+  }
+  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize })
+  const displayIndex = screen.getAllDisplays().findIndex((item) => item.id === display.id)
+  const source = sources.find((item) => item.display_id === String(display.id)) ?? sources[displayIndex]
+  if (!source) throw new Error('无法读取当前显示器画面')
+  const image = source.thumbnail
+  const { width, height } = image.getSize()
+  if (!width || !height) throw new Error('当前显示器未返回可用画面')
+  const x = Math.min(width - 1, Math.max(0, Math.floor((point.x - display.bounds.x) / display.bounds.width * width)))
+  const y = Math.min(height - 1, Math.max(0, Math.floor((point.y - display.bounds.y) / display.bounds.height * height)))
+  const bitmap = image.toBitmap()
+  const offset = (y * width + x) * 4
+  // Windows 的 NativeImage 位图是 BGRA；这里显式转换以避免红蓝通道互换。
+  const color = `#${[bitmap[offset + 2], bitmap[offset + 1], bitmap[offset]].map((value) => value.toString(16).padStart(2, '0')).join('').toUpperCase()}`
+  const cropSize = Math.min(17, width, height)
+  const cropX = Math.min(width - cropSize, Math.max(0, x - Math.floor(cropSize / 2)))
+  const cropY = Math.min(height - cropSize, Math.max(0, y - Math.floor(cropSize / 2)))
+  const preview = image.crop({ x: cropX, y: cropY, width: cropSize, height: cropSize }).resize({ width: 153, height: 153, quality: 'best' }).toDataURL()
+  return { color, preview }
+}
+
 function createTrendWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 860,
@@ -368,6 +415,32 @@ app.whenReady().then(() => {
   let panelWindow: BrowserWindow | undefined
   let trendWindow: BrowserWindow | undefined
   let toolboxWindow: BrowserWindow | undefined
+  let screenColorPicker: ScreenColorPickerSession | undefined
+  let screenColorCapturePending = false
+  const finishScreenColorPicker = (result?: { color?: string; error?: Error }): void => {
+    const session = screenColorPicker
+    if (!session) return
+    screenColorPicker = undefined
+    screenColorCapturePending = false
+    for (const overlay of session.overlayWindows) if (!overlay.isDestroyed()) overlay.destroy()
+    if (!session.sourceWindow.isDestroyed()) session.sourceWindow.show()
+    if (result?.color) session.resolve(result.color)
+    else session.reject(result?.error ?? new Error('已取消屏幕取色'))
+  }
+  const startScreenColorPicker = (sourceWindow: BrowserWindow): Promise<string> => new Promise((resolvePicker, rejectPicker) => {
+    if (screenColorPicker) { rejectPicker(new Error('屏幕取色已在进行中')); return }
+    const displays = screen.getAllDisplays()
+    if (!displays.length) { rejectPicker(new Error('未检测到可用显示器')); return }
+    sourceWindow.hide()
+    const overlayWindows = displays.map(createScreenColorPickerWindow)
+    screenColorPicker = { sourceWindow, overlayWindows, resolve: resolvePicker, reject: rejectPicker }
+    let readyCount = 0
+    const showWhenReady = (): void => {
+      readyCount += 1
+      if (readyCount === overlayWindows.length && screenColorPicker?.overlayWindows === overlayWindows) overlayWindows.forEach((overlay) => overlay.showInactive())
+    }
+    overlayWindows.forEach((overlay) => overlay.once('ready-to-show', showWhenReady))
+  })
   const cleanupTargets = new Map<string, { path: string; rootPath: string; directoryName: string }>()
   // const statusWindow = createStatusWindow()
   const moveWindow = (targetWindow: BrowserWindow | undefined, position: unknown): void => {
@@ -426,6 +499,34 @@ app.whenReady().then(() => {
   })
   ipcMain.on('window:close', (event) => BrowserWindow.fromWebContents(event.sender)?.close())
   ipcMain.handle('window:is-maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false)
+  ipcMain.handle('screen-color:pick', (event) => {
+    const sourceWindow = BrowserWindow.fromWebContents(event.sender)
+    if (!sourceWindow) throw new Error('无法确定取色来源窗口')
+    return startScreenColorPicker(sourceWindow)
+  })
+  ipcMain.on('screen-color:cancel', () => finishScreenColorPicker())
+  ipcMain.handle('screen-color:preview', async (_event, point: unknown) => {
+    if (!screenColorPicker || !point || typeof point !== 'object') throw new Error('屏幕取色未启动')
+    const { x, y } = point as { x?: unknown; y?: unknown }
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) throw new Error('取色坐标无效')
+    return readScreenColor({ x: Math.round(x), y: Math.round(y) })
+  })
+  ipcMain.on('screen-color:choose', async (_event, point: unknown) => {
+    if (!point || typeof point !== 'object') return
+    const { x, y } = point as { x?: unknown; y?: unknown }
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return
+    if (!screenColorPicker || screenColorCapturePending) return
+    screenColorCapturePending = true
+    for (const overlay of screenColorPicker.overlayWindows) if (!overlay.isDestroyed()) overlay.destroy()
+    try {
+      // 等待合成器移除准星覆盖层，确保截图不会把取色 UI 本身采进去。
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 80))
+      const { color } = await readScreenColor({ x: Math.round(x), y: Math.round(y) })
+      finishScreenColorPicker({ color })
+    } catch (error) {
+      finishScreenColorPicker({ error: error instanceof Error ? error : new Error(String(error)) })
+    }
+  })
   ipcMain.handle('network:get-local-ipv4', () => localIpv4Addresses())
   ipcMain.handle('network:detect-exit-ip', async () => {
     const response = await electronNet.fetch('https://ipwho.is/', { signal: AbortSignal.timeout(10_000) })
