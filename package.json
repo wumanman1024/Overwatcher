@@ -16,6 +16,7 @@
     "test": "pnpm --filter @hardware-overlay/shared test && pnpm --filter @hardware-overlay/desktop test",
     "package": "pnpm --filter @hardware-overlay/desktop package",
     "package:win": "pnpm --filter @hardware-overlay/desktop package:win",
+    "package:portable": "pnpm --filter @hardware-overlay/desktop package:portable",
     "package:mac": "pnpm --filter @hardware-overlay/desktop package:mac",
     "package:linux": "pnpm --filter @hardware-overlay/desktop package:linux",
     "fix-sandbox": "pnpm --filter @hardware-overlay/desktop fix-sandbox"
