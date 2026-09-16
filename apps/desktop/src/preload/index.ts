@@ -34,7 +34,7 @@ contextBridge.exposeInMainWorld('developerTools', {
 contextBridge.exposeInMainWorld('networkTools', {
   getLocalIpv4: () => ipcRenderer.invoke('network:get-local-ipv4'),
   detectExitIp: () => ipcRenderer.invoke('network:detect-exit-ip'),
-  diagnose: (host: string, port: number) => ipcRenderer.invoke('network:diagnose', { host, port })
+  diagnose: (host: string, port: number, mode: 'tcp' | 'http' | 'https') => ipcRenderer.invoke('network:diagnose', { host, port, mode })
 })
 
 contextBridge.exposeInMainWorld('processTools', {
@@ -67,7 +67,7 @@ contextBridge.exposeInMainWorld('nodeReleaseTools', {
 
 contextBridge.exposeInMainWorld('windowControls', {
   minimize: () => ipcRenderer.send('window:minimize'),
-  toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),
+  toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
   close: () => ipcRenderer.send('window:close'),
   isMaximized: () => ipcRenderer.invoke('window:is-maximized')
 })

@@ -1,11 +1,11 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeImage, net as electronNet, screen, Tray } from 'electron'
 import type { HardwareProfile, MetricSnapshot } from '@localforge/shared/metrics'
-import { basename, join, parse, relative, resolve } from 'node:path'
-import { lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { basename, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
+import { copyFile, lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { lookup, resolve4, resolve6 } from 'node:dns/promises'
-import { connect } from 'node:net'
+import { connect, isIP } from 'node:net'
 import { homedir, networkInterfaces } from 'node:os'
 import { collectBaseMetrics } from './collectors/base'
 import { MetricSampler } from './collectors/sampler'
@@ -48,8 +48,9 @@ type ScreenColorPickerSession = {
 function assistantConfigPath(tool: AssistantConfigTool, file: AssistantConfigFile): string {
   const userHome = homedir()
   const appData = process.env.APPDATA || join(userHome, 'AppData', 'Roaming')
+  const codexHome = process.env.CODEX_HOME || join(userHome, '.codex')
   const paths: Record<AssistantConfigTool, Record<AssistantConfigFile, string>> = {
-    codex: { prompt: join(userHome, '.codex', 'AGENTS.md'), config: join(userHome, '.codex', 'config.toml') },
+    codex: { prompt: join(codexHome, 'AGENTS.md'), config: join(codexHome, 'config.toml') },
     cursor: { prompt: join(userHome, '.cursor', 'rules', 'global.mdc'), config: join(appData, 'Cursor', 'User', 'settings.json') },
     'claude-code': { prompt: join(userHome, '.claude', 'CLAUDE.md'), config: join(userHome, '.claude', 'settings.json') }
   }
@@ -72,7 +73,8 @@ function localIpv4Addresses(): { lan: LocalIpv4[]; wired: LocalIpv4[] } {
     for (const entry of entries ?? []) {
       // 某些 Node/Electron 组合会以数字 4 表示地址族；链路本地地址
       // 也是有效的本机 IPv4，不能因为没有 DHCP 地址而被隐藏。
-      if (String(entry.family) !== 'IPv4' || entry.internal) continue
+      const family = String(entry.family)
+      if ((family !== 'IPv4' && family !== '4') || entry.internal) continue
       const address = { name, address: entry.address }
       if (!seen.has(`${name}:${entry.address}`)) {
         seen.add(`${name}:${entry.address}`)
@@ -84,15 +86,37 @@ function localIpv4Addresses(): { lan: LocalIpv4[]; wired: LocalIpv4[] } {
   return { lan, wired }
 }
 
-function commandOutput(command: string, args: string[], options?: { cwd?: string }): Promise<string> {
+function commandOutput(command: string, args: string[], options?: { cwd?: string; timeoutMs?: number }): Promise<string> {
   return new Promise((resolveCommand, rejectCommand) => {
-    const child = spawn(command, args, { windowsHide: true, ...options })
+    const child = spawn(command, args, { windowsHide: true, ...(options?.cwd ? { cwd: options.cwd } : {}) })
     let output = ''
     let errorOutput = ''
-    child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString() })
-    child.stderr.on('data', (chunk: Buffer) => { errorOutput += chunk.toString() })
-    child.once('error', rejectCommand)
-    child.once('exit', (code) => code === 0 ? resolveCommand(output) : rejectCommand(new Error(errorOutput || `${command} 退出，代码 ${code ?? '未知'}`)))
+    let settled = false
+    const maxOutputLength = 8 * 1024 * 1024
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      if (error) rejectCommand(error)
+      else resolveCommand(output)
+    }
+    const append = (target: 'output' | 'error', chunk: Buffer) => {
+      if (settled) return
+      if (target === 'output') output += chunk.toString()
+      else errorOutput += chunk.toString()
+      if (output.length + errorOutput.length > maxOutputLength) {
+        child.kill()
+        finish(new Error(`${command} 输出过多，已停止执行`))
+      }
+    }
+    child.stdout.on('data', (chunk: Buffer) => append('output', chunk))
+    child.stderr.on('data', (chunk: Buffer) => append('error', chunk))
+    child.once('error', (error) => finish(error))
+    child.once('close', (code) => code === 0 ? finish() : finish(new Error(errorOutput.trim() || `${command} 退出，代码 ${code ?? '未知'}`)))
+    const timeout = setTimeout(() => {
+      child.kill()
+      finish(new Error(`${command} 执行超时`))
+    }, options?.timeoutMs ?? 60_000)
   })
 }
 
@@ -114,14 +138,21 @@ let nvmAvailableReleaseCache: { expiresAt: number; releases: NvmAvailableRelease
 
 async function getNvmDownloadableNodeReleases(): Promise<NvmAvailableRelease[]> {
   if (nvmAvailableReleaseCache && nvmAvailableReleaseCache.expiresAt > Date.now()) return nvmAvailableReleaseCache.releases
-  const output = await commandOutput('nvm', ['list', 'available'])
-  const channels: NvmAvailableRelease['channel'][] = ['CURRENT', 'LTS', 'OLD STABLE', 'OLD UNSTABLE']
-  const releases = output.split(/\r?\n/).flatMap((line) => {
-    if (!line.trim().startsWith('|') || /^\|[-\s|]+\|$/.test(line)) return []
-    const columns = line.split('|').slice(1, -1).map((item) => item.trim())
-    if (columns.some((value) => /CURRENT|LTS|OLD/i.test(value))) return []
-    return columns.flatMap((version, index) => /^\d+\.\d+\.\d+$/.test(version) ? [{ version, channel: channels[index] }] : [])
+  const response = await electronNet.fetch('https://nodejs.org/dist/index.json', { signal: AbortSignal.timeout(15_000) })
+  if (!response.ok) throw new Error(`Node.js 发布目录响应异常（${response.status}）`)
+  const payload = await response.json() as unknown
+  if (!Array.isArray(payload)) throw new Error('Node.js 发布目录返回了意外的数据格式')
+  const latestVersion = payload.find((item) => item && typeof item === 'object' && typeof (item as { version?: unknown }).version === 'string') as { version?: string } | undefined
+  const currentMajor = latestVersion?.version?.replace(/^v/, '').split('.')[0]
+  const releases = payload.slice(0, 300).flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const release = item as { version?: unknown; lts?: unknown }
+    const version = typeof release.version === 'string' ? release.version.replace(/^v/, '') : ''
+    if (!/^\d+\.\d+\.\d+$/.test(version)) return []
+    const channel: NvmAvailableRelease['channel'] = release.lts ? 'LTS' : version.split('.')[0] === currentMajor ? 'CURRENT' : 'OLD UNSTABLE'
+    return [{ version, channel }]
   })
+  if (!releases.length) throw new Error('Node.js 发布目录没有返回可用版本')
   nvmAvailableReleaseCache = { releases, expiresAt: Date.now() + 15 * 60_000 }
   return releases
 }
@@ -130,7 +161,7 @@ async function installVersionManager(manager: unknown): Promise<void> {
   if (process.platform !== 'win32') throw new Error('内置安装入口当前仅支持 Windows')
   const packageId = manager === 'volta' ? 'Volta.Volta' : manager === 'nvm' ? 'CoreyButler.NVMforWindows' : undefined
   if (!packageId) throw new Error('版本管理工具参数无效')
-  await commandOutput('winget', ['install', '--exact', '--id', packageId, '--accept-package-agreements', '--accept-source-agreements'])
+  await commandOutput('winget', ['install', '--exact', '--id', packageId, '--accept-package-agreements', '--accept-source-agreements'], { timeoutMs: 10 * 60_000 })
 }
 
 async function getVoltaNodeState(): Promise<{ installed: boolean; voltaVersion?: string; versions: Array<{ version: string; isDefault: boolean }>; defaultVersion?: string; currentVersion?: string; error?: string }> {
@@ -184,11 +215,29 @@ async function getNvmNodeState(): Promise<{ installed: boolean; nvmVersion?: str
   }
 }
 
-async function processNameForPid(pid: number): Promise<string> {
-  if (process.platform !== 'win32') return '未知进程'
-  const output = await commandOutput('tasklist.exe', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH']).catch(() => '')
-  const match = output.match(/^"([^"]+)"/m)
-  return match?.[1] ?? '未知进程'
+function parseCsvRow(row: string): string[] {
+  const fields: string[] = []
+  let value = ''
+  let quoted = false
+  for (let index = 0; index < row.length; index += 1) {
+    const character = row[index]
+    if (character === '"' && quoted && row[index + 1] === '"') { value += '"'; index += 1 }
+    else if (character === '"') quoted = !quoted
+    else if (character === ',' && !quoted) { fields.push(value); value = '' }
+    else value += character
+  }
+  fields.push(value)
+  return fields
+}
+
+async function processNamesByPid(): Promise<Map<number, string>> {
+  const output = await commandOutput('tasklist.exe', ['/FO', 'CSV', '/NH'])
+  return new Map(output.split(/\r?\n/).flatMap((line) => {
+    if (!line.trim()) return []
+    const fields = parseCsvRow(line)
+    const pid = Number(fields[1])
+    return Number.isInteger(pid) && pid > 0 ? [[pid, fields[0] || '未知进程'] as const] : []
+  }))
 }
 
 async function listListeningProcesses(): Promise<ListeningProcess[]> {
@@ -203,7 +252,8 @@ async function listListeningProcesses(): Promise<ListeningProcess[]> {
     const port = Number(local.slice(separator + 1))
     return { protocol: fields[0]?.toUpperCase() ?? 'TCP', address: local.slice(0, separator), port, pid }
   }).filter((item) => Number.isInteger(item.port) && item.port > 0 && Number.isInteger(item.pid) && item.pid > 0)
-  const withNames = await Promise.all(parsed.map(async (item) => ({ ...item, name: await processNameForPid(item.pid) })))
+  const names = await processNamesByPid().catch(() => new Map<number, string>())
+  const withNames = parsed.map((item) => ({ ...item, name: names.get(item.pid) ?? '未知进程' }))
   return withNames.sort((left, right) => left.port - right.port)
 }
 
@@ -224,16 +274,7 @@ function diagnoseTcp(host: string, port: number): Promise<{ reachable: boolean; 
 }
 
 async function removeDirectory(path: string): Promise<void> {
-  if (process.platform !== 'win32') {
-    await rm(path, { recursive: true, force: true, maxRetries: 4, retryDelay: 200 })
-    return
-  }
-  await new Promise<void>((resolveRemove, rejectRemove) => {
-    // Windows 的 rd 直接由系统处理目录树，通常比逐文件删除更适合 node_modules 这类小文件集合。
-    const child = spawn('cmd.exe', ['/d', '/s', '/c', `rd /s /q "${path}"`], { windowsHide: true })
-    child.once('error', rejectRemove)
-    child.once('exit', (code) => code === 0 ? resolveRemove() : rejectRemove(new Error(`Windows 删除命令退出，代码 ${code ?? '未知'}`)))
-  })
+  await rm(path, { recursive: true, force: true, maxRetries: 4, retryDelay: 200 })
 }
 
 function createOrbWindow(): BrowserWindow {
@@ -425,7 +466,11 @@ app.whenReady().then(() => {
     for (const overlay of session.overlayWindows) if (!overlay.isDestroyed()) overlay.destroy()
     if (!session.sourceWindow.isDestroyed()) session.sourceWindow.show()
     if (result?.color) session.resolve(result.color)
-    else session.reject(result?.error ?? new Error('已取消屏幕取色'))
+    else {
+      const error = result?.error ?? new Error('已取消屏幕取色')
+      if (!result?.error) error.name = 'AbortError'
+      session.reject(error)
+    }
   }
   const startScreenColorPicker = (sourceWindow: BrowserWindow): Promise<string> => new Promise((resolvePicker, rejectPicker) => {
     if (screenColorPicker) { rejectPicker(new Error('屏幕取色已在进行中')); return }
@@ -440,6 +485,9 @@ app.whenReady().then(() => {
       if (readyCount === overlayWindows.length && screenColorPicker?.overlayWindows === overlayWindows) overlayWindows.forEach((overlay) => overlay.showInactive())
     }
     overlayWindows.forEach((overlay) => overlay.once('ready-to-show', showWhenReady))
+    overlayWindows.forEach((overlay) => overlay.webContents.once('did-fail-load', (_event, code, description) => {
+      finishScreenColorPicker({ error: new Error(`取色界面加载失败（${code}）：${description}`) })
+    }))
   })
   const cleanupTargets = new Map<string, { path: string; rootPath: string; directoryName: string }>()
   // const statusWindow = createStatusWindow()
@@ -491,11 +539,12 @@ app.whenReady().then(() => {
   ipcMain.on('monitor:open-trend', openTrend)
   ipcMain.on('monitor:close-trend', (event) => BrowserWindow.fromWebContents(event.sender)?.close())
   ipcMain.on('window:minimize', (event) => BrowserWindow.fromWebContents(event.sender)?.minimize())
-  ipcMain.on('window:toggle-maximize', (event) => {
+  ipcMain.handle('window:toggle-maximize', (event) => {
     const target = BrowserWindow.fromWebContents(event.sender)
-    if (!target) return
+    if (!target) return false
     if (target.isMaximized()) target.unmaximize()
     else target.maximize()
+    return target.isMaximized()
   })
   ipcMain.on('window:close', (event) => BrowserWindow.fromWebContents(event.sender)?.close())
   ipcMain.handle('window:is-maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false)
@@ -529,34 +578,50 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('network:get-local-ipv4', () => localIpv4Addresses())
   ipcMain.handle('network:detect-exit-ip', async () => {
-    const response = await electronNet.fetch('https://ipwho.is/', { signal: AbortSignal.timeout(10_000) })
-    if (!response.ok) throw new Error(`出口 IP 服务响应异常（${response.status}）`)
-    const payload = await response.json() as {
-      success?: unknown
-      ip?: unknown
-      country?: unknown
-      city?: unknown
-      connection?: { isp?: unknown }
-      timezone?: { id?: unknown }
-    }
-    if (payload.success === false) throw new Error('出口 IP 服务未能完成查询')
-    if (typeof payload.ip !== 'string' || !payload.ip) throw new Error('出口 IP 服务没有返回有效地址')
-    return {
-      ip: payload.ip,
-      country: typeof payload.country === 'string' ? payload.country : '',
-      city: typeof payload.city === 'string' ? payload.city : '',
-      isp: typeof payload.connection?.isp === 'string' ? payload.connection.isp : '',
-      timezone: typeof payload.timezone?.id === 'string' ? payload.timezone.id : ''
+    try {
+      const response = await electronNet.fetch('https://ipwho.is/', { signal: AbortSignal.timeout(10_000) })
+      if (!response.ok) throw new Error(`出口 IP 服务响应异常（${response.status}）`)
+      const payload = await response.json() as {
+        success?: unknown
+        ip?: unknown
+        country?: unknown
+        city?: unknown
+        connection?: { isp?: unknown }
+        timezone?: { id?: unknown }
+      }
+      if (payload.success === false || typeof payload.ip !== 'string' || !payload.ip) throw new Error('出口 IP 服务没有返回有效地址')
+      return {
+        ip: payload.ip,
+        country: typeof payload.country === 'string' ? payload.country : '',
+        city: typeof payload.city === 'string' ? payload.city : '',
+        isp: typeof payload.connection?.isp === 'string' ? payload.connection.isp : '',
+        timezone: typeof payload.timezone?.id === 'string' ? payload.timezone.id : ''
+      }
+    } catch (primaryError) {
+      try {
+        const response = await electronNet.fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(10_000) })
+        if (!response.ok) throw new Error(`备用服务响应异常（${response.status}）`)
+        const payload = await response.json() as { ip?: unknown }
+        if (typeof payload.ip !== 'string' || !payload.ip) throw new Error('备用服务没有返回有效地址')
+        return { ip: payload.ip, country: '', city: '', isp: '', timezone: '' }
+      } catch (fallbackError) {
+        const primaryMessage = primaryError instanceof Error ? primaryError.message : String(primaryError)
+        const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+        throw new Error(`出口 IP 检测失败：${primaryMessage}；备用服务：${fallbackMessage}`)
+      }
     }
   })
   ipcMain.handle('network:diagnose', async (_event, request: unknown) => {
     const { host, port, mode } = request as { host?: unknown; port?: unknown; mode?: unknown }
     if (typeof host !== 'string' || !host.trim()) throw new Error('请输入域名或 IP 地址')
-    const normalizedHost = host.trim()
+    const normalizedHost = host.trim().replace(/^\[|\]$/g, '')
+    if (normalizedHost.length > 253 || /[\s\\/?#@]/.test(normalizedHost) || normalizedHost.includes(':') && isIP(normalizedHost) !== 6) throw new Error('请输入纯域名或 IP 地址，不要包含协议、端口和路径')
     const normalizedPort = typeof port === 'number' ? port : Number(port)
     if (!Number.isInteger(normalizedPort) || normalizedPort < 1 || normalizedPort > 65_535) throw new Error('端口必须在 1 到 65535 之间')
     if (mode !== 'tcp' && mode !== 'http' && mode !== 'https') throw new Error('诊断方式无效')
-    const addresses = await lookup(normalizedHost, { all: true }).then((items) => items.map((item) => item.address))
+    const addressResult = await lookup(normalizedHost, { all: true })
+      .then((items) => ({ addresses: items.map((item) => item.address), error: undefined }))
+      .catch((error: unknown) => ({ addresses: [] as string[], error: error instanceof Error ? error.message : String(error) }))
     const [ipv4, ipv6, tcp, http] = await Promise.all([
       resolve4(normalizedHost).catch(() => [] as string[]),
       resolve6(normalizedHost).catch(() => [] as string[]),
@@ -564,18 +629,19 @@ app.whenReady().then(() => {
       mode === 'tcp' ? Promise.resolve(undefined) : (async () => {
         const startedAt = performance.now()
         try {
-          const response = await electronNet.fetch(`${mode}://${normalizedHost}:${normalizedPort}/`, { method: 'HEAD', signal: AbortSignal.timeout(8_000) })
+          const urlHost = normalizedHost.includes(':') ? `[${normalizedHost}]` : normalizedHost
+          const response = await electronNet.fetch(`${mode}://${urlHost}:${normalizedPort}/`, { method: 'HEAD', signal: AbortSignal.timeout(8_000) })
           return { reachable: true, status: response.status, statusText: response.statusText, latencyMs: Math.round(performance.now() - startedAt) }
         } catch (error) {
           return { reachable: false, error: error instanceof Error ? error.message : String(error) }
         }
       })()
     ])
-    return { host: normalizedHost, port: normalizedPort, addresses: [...new Set(addresses)], ipv4, ipv6, tcp, http }
+    return { host: normalizedHost, port: normalizedPort, mode, addresses: [...new Set(addressResult.addresses)], dnsError: addressResult.error, ipv4, ipv6, tcp, http }
   })
   ipcMain.handle('process:list-listening', () => listListeningProcesses())
   ipcMain.handle('process:terminate', async (_event, rawPid: unknown) => {
-    if (!Number.isInteger(rawPid) || rawPid <= 0) throw new Error('进程 ID 无效')
+    if (typeof rawPid !== 'number' || !Number.isInteger(rawPid) || rawPid <= 0) throw new Error('进程 ID 无效')
     if (process.platform !== 'win32') throw new Error('端口进程管理当前仅支持 Windows')
     await commandOutput('taskkill.exe', ['/PID', String(rawPid), '/T', '/F'])
     return { pid: rawPid }
@@ -584,7 +650,7 @@ app.whenReady().then(() => {
   ipcMain.handle('volta:get-node-state', () => getVoltaNodeState())
   ipcMain.handle('volta:install-node', async (_event, rawVersion: unknown) => {
     const version = assertNodeSpecifier(rawVersion)
-    await commandOutput('volta', ['install', `node@${version}`])
+    await commandOutput('volta', ['install', `node@${version}`], { timeoutMs: 10 * 60_000 })
     return getVoltaNodeState()
   })
   ipcMain.handle('volta:pin-node', async (_event, request: unknown) => {
@@ -594,13 +660,13 @@ app.whenReady().then(() => {
     const projectDirectory = resolve(directory)
     const info = await lstat(projectDirectory)
     if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('请选择一个真实的项目目录')
-    await commandOutput('volta', ['pin', `node@${normalizedVersion}`], { cwd: projectDirectory })
+    await commandOutput('volta', ['pin', `node@${normalizedVersion}`], { cwd: projectDirectory, timeoutMs: 10 * 60_000 })
     return { directory: projectDirectory, version: normalizedVersion }
   })
   ipcMain.handle('nvm:get-node-state', () => getNvmNodeState())
   ipcMain.handle('nvm:install-node', async (_event, rawVersion: unknown) => {
     const version = assertNodeSpecifier(rawVersion)
-    await commandOutput('nvm', ['install', version])
+    await commandOutput('nvm', ['install', version], { timeoutMs: 10 * 60_000 })
     return getNvmNodeState()
   })
   ipcMain.handle('nvm:use-node', async (_event, rawVersion: unknown) => {
@@ -632,8 +698,12 @@ app.whenReady().then(() => {
   ipcMain.handle('assistant-config:save', async (_event, request: unknown) => {
     const { tool, file, content } = assertAssistantConfigRequest(request)
     if (content === undefined) throw new Error('配置内容无效')
+    if (Buffer.byteLength(content, 'utf8') > 2 * 1024 * 1024) throw new Error('配置文件不能超过 2 MB')
     const path = assistantConfigPath(tool, file)
     await mkdir(parse(path).dir, { recursive: true })
+    await copyFile(path, `${path}.bak`).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error
+    })
     await writeFile(path, content, 'utf8')
     return { path }
   })
@@ -651,23 +721,34 @@ app.whenReady().then(() => {
     if (normalizedRoot === parse(normalizedRoot).root) throw new Error('不能以磁盘根目录作为扫描范围')
     const rootInfo = await lstat(normalizedRoot)
     if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error('请选择一个真实目录作为扫描根目录')
+    cleanupTargets.clear()
     const matches: Array<{ id: string; path: string }> = []
     const visit = async (currentPath: string): Promise<void> => {
-      const entries = await readdir(currentPath, { withFileTypes: true })
+      const entries = await readdir(currentPath, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'EACCES' || error.code === 'EPERM') return []
+        throw error
+      })
       for (const entry of entries) {
         if (!entry.isDirectory() || entry.isSymbolicLink()) continue
         const childPath = join(currentPath, entry.name)
-        if (entry.name === normalizedName) {
+        const nameMatches = entry.name === normalizedName || (process.platform === 'win32' || process.platform === 'darwin') && entry.name.toLocaleLowerCase() === normalizedName.toLocaleLowerCase()
+        if (nameMatches) {
+          if (matches.length >= 10_000) throw new Error('匹配目录超过 10000 个，请缩小扫描范围')
           const id = randomUUID()
-          cleanupTargets.set(id, { path: childPath, rootPath: normalizedRoot, directoryName: normalizedName })
+          cleanupTargets.set(id, { path: childPath, rootPath: normalizedRoot, directoryName: entry.name })
           matches.push({ id, path: childPath })
           continue
         }
         await visit(childPath)
       }
     }
-    await visit(normalizedRoot)
-    return matches
+    try {
+      await visit(normalizedRoot)
+      return matches
+    } catch (error) {
+      cleanupTargets.clear()
+      throw error
+    }
   })
   ipcMain.handle('toolbox:delete-directories', async (_event, ids: unknown) => {
     if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) throw new Error('删除参数无效')
@@ -680,7 +761,7 @@ app.whenReady().then(() => {
       }
       try {
         const relativePath = relative(target.rootPath, target.path)
-        if (!relativePath || relativePath.startsWith('..') || basename(target.path) !== target.directoryName) throw new Error('目标目录不在安全扫描范围内')
+        if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath) || basename(target.path) !== target.directoryName) throw new Error('目标目录不在安全扫描范围内')
         const info = await lstat(target.path)
         if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('目标目录已变化或不是可删除的真实目录')
         await removeDirectory(target.path)
@@ -702,19 +783,35 @@ app.whenReady().then(() => {
     const targetRoot = resolve(outputDirectory)
     const targetInfo = await lstat(targetRoot)
     if (!targetInfo.isDirectory() || targetInfo.isSymbolicLink()) throw new Error('请选择真实的导出文件夹')
-    const batchDirectory = join(targetRoot, `tinypng-output-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}-${randomUUID().slice(0, 8)}`)
-    await mkdir(batchDirectory, { recursive: false })
-    const saved: string[] = []
+    if (files.length > 500) throw new Error('单次最多导出 500 张图片')
+    const validated: Array<{ name: string; data: ArrayBuffer }> = []
+    const usedNames = new Set<string>()
+    let totalBytes = 0
     for (const file of files) {
       if (!file || typeof file !== 'object') throw new Error('图片数据无效')
       const { name, data } = file as { name?: unknown; data?: unknown }
       if (typeof name !== 'string' || !(data instanceof ArrayBuffer)) throw new Error('图片数据无效')
       const safeName = basename(name)
       if (!/^[a-z0-9][a-z0-9._-]*$/i.test(safeName)) throw new Error('导出文件名无效')
-      const outputPath = resolve(batchDirectory, safeName)
-      if (relative(batchDirectory, outputPath).startsWith('..')) throw new Error('导出路径无效')
-      await writeFile(outputPath, Buffer.from(data))
-      saved.push(outputPath)
+      if (usedNames.has(safeName.toLowerCase())) throw new Error(`导出文件名重复：${safeName}`)
+      usedNames.add(safeName.toLowerCase())
+      totalBytes += data.byteLength
+      if (totalBytes > 512 * 1024 * 1024) throw new Error('单次导出数据不能超过 512 MB')
+      validated.push({ name: safeName, data })
+    }
+    const batchDirectory = join(targetRoot, `localforge-images-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}-${randomUUID().slice(0, 8)}`)
+    await mkdir(batchDirectory, { recursive: false })
+    const saved: string[] = []
+    try {
+      for (const file of validated) {
+        const outputPath = resolve(batchDirectory, file.name)
+        if (relative(batchDirectory, outputPath).startsWith('..')) throw new Error('导出路径无效')
+        await writeFile(outputPath, Buffer.from(file.data))
+        saved.push(outputPath)
+      }
+    } catch (error) {
+      await rm(batchDirectory, { recursive: true, force: true }).catch(() => undefined)
+      throw error
     }
     return { directory: batchDirectory, files: saved }
   })
