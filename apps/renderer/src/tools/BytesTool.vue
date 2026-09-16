@@ -1,5 +1,12 @@
 <script setup lang="ts">
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import ToolboxPage from '../ToolboxPage.vue'
+const router = useRouter(); const byteSource = ref('1024'); const byteUnit = ref<'B' | 'KB' | 'MB' | 'GB' | 'TB'>('KB'); const byteResult = ref<Array<{ unit: string; value: string }>>([]); const byteMessage = ref('支持任意长度的非负整数，小数结果会完整显示，不会丢失精度。'); const byteUnits = ['B', 'KB', 'MB', 'GB', 'TB'] as const; const backToPortal = () => router.push({ name: 'portal' })
+const formatByteValue = (bytes: bigint, unitIndex: number) => { const divisor = 1024n ** BigInt(unitIndex); const whole = bytes / divisor; let remainder = bytes % divisor; if (!remainder) return whole.toString(); let fraction = ''; while (remainder) { remainder *= 10n; fraction += (remainder / divisor).toString(); remainder %= divisor } return `${whole}.${fraction}` }
+const convertBytes = () => { try { if (!/^\d+$/.test(byteSource.value.trim())) throw new Error('请输入非负整数；小数会造成字节精度歧义。'); const bytes = BigInt(byteSource.value.trim()) * 1024n ** BigInt(byteUnits.indexOf(byteUnit.value)); byteResult.value = byteUnits.map((unit, index) => ({ unit, value: formatByteValue(bytes, index) })); byteMessage.value = '已按 1 KB = 1024 B 精确换算。' } catch (error) { byteResult.value = []; byteMessage.value = error instanceof Error ? error.message : '无法转换输入数值。' } }
+const copyByteValue = async (item: { unit: string; value: string }) => { await navigator.clipboard.writeText(`${item.value} ${item.unit}`); byteMessage.value = `${item.unit} 数值已复制到剪贴板。` }
+const copyByteResults = async () => { await navigator.clipboard.writeText(byteResult.value.map((item) => `${item.unit}: ${item.value}`).join('\n')); byteMessage.value = '全部换算结果已复制到剪贴板。' }
+convertBytes()
 </script>
-
-<template><ToolboxPage tool="bytes" /></template>
+<template><ToolboxPage><header class="toolbox-heading"><div><p>数据工具 / BYTES</p><h2>字节单位转换</h2><span>采用 1 KB = 1024 B 的二进制换算方式，支持任意长度整数。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header><section class="converter-card byte-card"><label>数值<input v-model.trim="byteSource" inputmode="numeric" spellcheck="false" placeholder="例如 1048576" @input="convertBytes"></label><label>输入单位<select v-model="byteUnit" @change="convertBytes"><option>B</option><option>KB</option><option>MB</option><option>GB</option><option>TB</option></select></label><button :disabled="!byteResult.length" @click="copyByteResults">复制全部结果</button><p class="tool-message" :class="{ error: !byteResult.length }">{{ byteMessage }}</p><section v-if="byteResult.length" class="byte-results"><div v-for="item in byteResult" :key="item.unit"><small>{{ item.unit }}</small><strong :title="item.value">{{ item.value }}</strong><button type="button" @click="copyByteValue(item)">复制</button></div></section></section></ToolboxPage></template>

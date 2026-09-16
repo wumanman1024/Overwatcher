@@ -1,5 +1,9 @@
 <script setup lang="ts">
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import ToolboxPage from '../ToolboxPage.vue'
+const router = useRouter(); const exitIp = ref<ExitIpResult>(); const ipCheckState = ref<'idle' | 'checking' | 'error'>('idle'); const ipCheckMessage = ref('检测会访问外部 IP 服务，以显示当前应用实际使用的出口地址。'); const backToPortal = () => router.push({ name: 'portal' })
+const checkExitIp = async () => { if (!window.networkTools) { ipCheckState.value = 'error'; ipCheckMessage.value = '网络检测组件刚刚更新，请完全退出并重新启动 LocalForge 后再试。'; return } ipCheckState.value = 'checking'; ipCheckMessage.value = '正在检测当前出口地址…'; try { exitIp.value = await window.networkTools.detectExitIp(); ipCheckState.value = 'idle'; ipCheckMessage.value = '检测完成。这是 LocalForge 当前网络连接实际使用的出口 IP。' } catch (error) { exitIp.value = undefined; ipCheckState.value = 'error'; ipCheckMessage.value = error instanceof Error ? error.message : String(error) } }
+const copyExitIp = async () => { if (exitIp.value) { await navigator.clipboard.writeText(exitIp.value.ip); ipCheckMessage.value = '出口 IP 已复制到剪贴板。' } }
 </script>
-
-<template><ToolboxPage tool="ip-check" /></template>
+<template><ToolboxPage><header class="toolbox-heading"><div><p>网络工具 / 出口检测</p><h2>IP 与代理检测</h2><span>通过外部服务确认当前应用的实际出口公网 IP。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header><section class="ip-check-card"><div class="ip-check-intro"><i aria-hidden="true">◎</i><div><strong>当前网络出口</strong><span>启用系统代理或 VPN 后，检测结果应显示代理服务器的出口地址。</span></div><button class="primary" type="button" :disabled="ipCheckState === 'checking'" @click="checkExitIp">{{ ipCheckState === 'checking' ? '检测中…' : '检测出口 IP' }}</button></div><p class="tool-message" :class="{ error: ipCheckState === 'error' }">{{ ipCheckMessage }}</p><dl v-if="exitIp" class="ip-result"><div class="ip-result-primary"><dt>出口 IP</dt><dd>{{ exitIp.ip }}</dd><button type="button" @click="copyExitIp">复制 IP</button></div><div><dt>国家或地区</dt><dd>{{ exitIp.country || '未提供' }}</dd></div><div><dt>城市</dt><dd>{{ exitIp.city || '未提供' }}</dd></div><div><dt>网络服务商</dt><dd>{{ exitIp.isp || '未提供' }}</dd></div><div><dt>时区</dt><dd>{{ exitIp.timezone || '未提供' }}</dd></div></dl></section></ToolboxPage></template>

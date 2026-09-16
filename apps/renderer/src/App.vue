@@ -8,8 +8,6 @@ import HardwareOverview from './HardwareOverview.vue'
 import { RouterView } from 'vue-router'
 import SvgIcon from './components/SvgIcon.vue'
 
-declare global { interface Window { hardwareMonitor: { getSnapshot(): Promise<MetricSnapshot | undefined>; getHistory(): Promise<MetricSnapshot[]>; subscribe(callback: (snapshot: MetricSnapshot) => void): () => void; moveOverlay(position: { x: number; y: number }): void; movePanel(position: { x: number; y: number }): void; moveTrend(position: { x: number; y: number }): void; openPanel(): void; closePanel(): void; openTrend(): void; closeTrend(): void; subscribeStatus(callback: (text: string) => void): () => void }; windowControls: { minimize(): void; toggleMaximize(): void; close(): void; isMaximized(): Promise<boolean> } } }
-
 const snapshot = ref<MetricSnapshot>()
 const orbMetrics = [
   { label: 'CPU', key: 'cpu' },

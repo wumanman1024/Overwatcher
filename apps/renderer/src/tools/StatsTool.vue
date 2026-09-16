@@ -1,5 +1,9 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import ToolboxPage from '../ToolboxPage.vue'
+const router = useRouter(); const statsSource = ref('LocalForge 本地开发者工具箱'); const backToPortal = () => router.push({ name: 'portal' })
+const textStats = computed(() => { const text = statsSource.value; return { characters: Array.from(text).length, noWhitespace: Array.from(text.replace(/\s/g, '')).length, chinese: (text.match(/\p{Script=Han}/gu) ?? []).length, words: (text.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? []).length, numbers: (text.match(/\d/g) ?? []).length, lines: text ? text.split(/\r\n|\r|\n/).length : 0, bytes: new TextEncoder().encode(text).length } })
+const copyTextStats = async () => { const stats = textStats.value; await navigator.clipboard.writeText([`字符数: ${stats.characters}`, `非空白字符: ${stats.noWhitespace}`, `汉字: ${stats.chinese}`, `英文词: ${stats.words}`, `数字: ${stats.numbers}`, `行数: ${stats.lines}`, `UTF-8 字节: ${stats.bytes}`].join('\n')) }
 </script>
-
-<template><ToolboxPage tool="stats" /></template>
+<template><ToolboxPage><header class="toolbox-heading"><div><p>数据工具 / TEXT</p><h2>字数统计</h2><span>实时统计文本字符、词数、行数和 UTF-8 字节长度。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header><section class="stats-layout"><label>待统计文本<textarea v-model="statsSource" spellcheck="false" placeholder="输入或粘贴文本"></textarea></label><section class="stats-grid"><div><small>字符数</small><strong>{{ textStats.characters }}</strong></div><div><small>非空白字符</small><strong>{{ textStats.noWhitespace }}</strong></div><div><small>汉字</small><strong>{{ textStats.chinese }}</strong></div><div><small>英文词</small><strong>{{ textStats.words }}</strong></div><div><small>数字</small><strong>{{ textStats.numbers }}</strong></div><div><small>行数</small><strong>{{ textStats.lines }}</strong></div><div><small>UTF-8 字节</small><strong>{{ textStats.bytes }}</strong></div><button type="button" @click="copyTextStats">复制统计</button></section></section></ToolboxPage></template>

@@ -1,5 +1,10 @@
 <script setup lang="ts">
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import ToolboxPage from '../ToolboxPage.vue'
+const router = useRouter(); const radixSource = ref('255'); const radixFrom = ref(10); const radixTo = ref(16); const radixResult = ref('FF'); const radixMessage = ref('支持 2 至 36 进制的整数转换。'); const backToPortal = () => router.push({ name: 'portal' })
+const parseRadixInteger = (source: string, radix: number): bigint => { const normalized = source.trim().toLowerCase(); if (!normalized) throw new Error('请输入整数'); const negative = normalized.startsWith('-'); const digits = negative || normalized.startsWith('+') ? normalized.slice(1) : normalized; if (!digits) throw new Error('请输入有效整数'); let value = 0n; for (const character of digits) { const digit = Number.parseInt(character, 36); if (!Number.isInteger(digit) || digit >= radix) throw new Error(`“${character}”不属于 ${radix} 进制`); value = value * BigInt(radix) + BigInt(digit) } return negative ? -value : value }
+const convertRadix = () => { try { if (radixSource.value.trim().length > 100_000) throw new Error('输入数字不能超过 10 万位'); if (radixFrom.value < 2 || radixFrom.value > 36 || radixTo.value < 2 || radixTo.value > 36) throw new Error('进制范围必须是 2 到 36'); radixResult.value = parseRadixInteger(radixSource.value, radixFrom.value).toString(radixTo.value).toUpperCase(); radixMessage.value = `已转换为 ${radixTo.value} 进制。` } catch (error) { radixMessage.value = `转换失败：${error instanceof Error ? error.message : String(error)}` } }
+const copyRadixResult = async () => { if (radixResult.value) { await navigator.clipboard.writeText(radixResult.value); radixMessage.value = '转换结果已复制到剪贴板。' } }
 </script>
-
-<template><ToolboxPage tool="radix" /></template>
+<template><ToolboxPage><header class="toolbox-heading"><div><p>数据工具 / RADIX</p><h2>进制转换</h2><span>支持 2 至 36 进制的任意精度整数，不受 JavaScript Number 精度限制。</span></div><button class="back-button" @click="backToPortal">‹ 返回工具列表</button></header><section class="converter-card"><label>输入数值<input v-model="radixSource" spellcheck="false"></label><label>原进制<input v-model.number="radixFrom" type="number" min="2" max="36"></label><label>目标进制<input v-model.number="radixTo" type="number" min="2" max="36"></label><button class="primary" @click="convertRadix">转换</button><button :disabled="!radixResult" @click="copyRadixResult">复制结果</button><p class="tool-message">{{ radixMessage }}</p><label class="converter-result">转换结果<textarea v-model="radixResult" readonly></textarea></label></section></ToolboxPage></template>
