@@ -1,4 +1,4 @@
-const orbSize = { width: 168, height: 72 };
+const orbSize = { width: 156, height: 72 };
 const expandedSize = { width: 1060, height: 740 };
 export function sizeForOverlayMode(mode) {
     return mode === 'expanded' || mode === 'pinned' ? expandedSize : orbSize;

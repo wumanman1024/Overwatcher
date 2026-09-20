@@ -122,7 +122,7 @@ h1, h2, p { margin: 0; }
 
 .overlay {
   position: relative;
-  width: 168px;
+  width: 156px;
   height: 72px;
   padding: 0;
   overflow: hidden;
@@ -242,15 +242,15 @@ h1, h2, p { margin: 0; }
 
 .orb-reading > strong {
   position: absolute;
-  top: 25px;
+  top: 28px;
   left: 0;
   width: 100%;
   margin: 0;
   overflow: hidden;
   color: var(--vp-text-1);
-  font-size: 22px;
+  font-size: 25px;
   font-weight: 500;
-  line-height: 22px;
+  line-height: 25px;
   letter-spacing: -0.055em;
   text-align: center;
   text-overflow: clip;
@@ -277,15 +277,15 @@ h1, h2, p { margin: 0; }
   left: 60px;
   display: flex;
   align-items: center;
-  width: 108px;
+  width: 96px;
   height: 46px;
-  padding: 5px 6px 5px 19px;
+  padding: 5px 5px 5px 16px;
   overflow: hidden;
   border: 1px solid rgba(6, 173, 86, 0.22);
   border-left: 0;
   border-radius: 13px;
   background: linear-gradient(110deg, rgba(238, 250, 244, 0.78), rgba(255, 255, 255, 0.68));
-  clip-path: path('M 0 0 H 95 Q 108 0 108 13 V 33 Q 108 46 95 46 H 0 C 7 39 12 31 12 23 C 12 15 7 7 0 0 Z');
+  clip-path: path('M 0 0 H 83 Q 96 0 96 13 V 33 Q 96 46 83 46 H 0 C 7 39 12 31 12 23 C 12 15 7 7 0 0 Z');
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
