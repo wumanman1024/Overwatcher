@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { CollectorResult } from './sampler'
 import { collectWindowsGpuMetrics } from './windows-gpu'
+import { createBackoffGate } from './cache'
 
 const execFileAsync = promisify(execFile)
 
@@ -30,3 +31,12 @@ export async function collectNvidiaMetrics(): Promise<CollectorResult> {
     return { gpu: { available: false, reason: '未检测到可用的 NVIDIA 驱动' } }
   }
 }
+
+/*
+ * 无 GPU（或无可用计数器）的机器不必每秒 spawn PowerShell/nvidia-smi 探测：
+ * 采集失败时重试间隔从 1s 指数退避到最长 60s，一旦恢复可用立刻回到 1s。
+ */
+export const collectGpuMetricsWithBackoff = createBackoffGate(collectNvidiaMetrics, {
+  isAvailable: (result) => Boolean((result as CollectorResult).gpu?.available),
+  baseMs: 1_000
+})

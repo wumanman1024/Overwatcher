@@ -1,5 +1,6 @@
 import si from 'systeminformation'
 import type { CollectorResult } from './sampler'
+import { createCache } from './cache'
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -16,9 +17,20 @@ export function getDiskIoRates(disks: { rIO_sec?: number | null; wIO_sec?: numbe
   return { read: disks?.rIO_sec ?? 0, write: disks?.wIO_sec ?? 0 }
 }
 
+/*
+ * 采集分频：磁盘容量 / 布局 / CPU 静态信息几乎不变，而 Windows 下每次
+ * systeminformation 调用都可能拉起 PowerShell 子进程，用 TTL 缓存把它们
+ * 挪出 1 秒热路径；利用率、内存、磁盘 IO、网速保持实时。
+ */
+const filesystemsCache = createCache(() => si.fsSize().catch(() => []), { ttlMs: 60_000 })
+const diskLayoutCache = createCache(() => si.diskLayout().catch(() => []), { ttlMs: 60_000 })
+const cpuInfoCache = createCache(() => si.cpu(), { ttlMs: 60_000 })
+const cpuTemperatureCache = createCache(() => si.cpuTemperature().catch(() => ({ main: -1 } as Awaited<ReturnType<typeof si.cpuTemperature>>)), { ttlMs: 5_000 })
+const diskIoCache = createCache(() => si.disksIO().catch(() => null), { ttlMs: 3_000 })
+
 export async function collectBaseMetrics(): Promise<CollectorResult> {
-  const [load, memory, disks, network, filesystems, cpu, temperature, diskDevices] = await Promise.all([
-    si.currentLoad(), si.mem(), si.disksIO(), si.networkStats(), si.fsSize(), si.cpu(), si.cpuTemperature(), si.diskLayout().catch(() => [])
+  const [load, memory, network, disks, filesystems, cpu, temperature, diskDevices] = await Promise.all([
+    si.currentLoad(), si.mem(), si.networkStats(), diskIoCache(), filesystemsCache(), cpuInfoCache(), cpuTemperatureCache(), diskLayoutCache()
   ])
   const net = network[0]
   const diskIoRates = getDiskIoRates(disks)

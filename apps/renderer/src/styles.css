@@ -136,7 +136,7 @@ h1, h2, p { margin: 0; }
 }
 
 .overlay:active { cursor: grabbing; }
-.overlay:focus-visible .orb-face { outline: 2px solid var(--orb-brand-glow); outline-offset: -2px; }
+.overlay:focus-visible .orb-face { outline: 2px solid var(--orb-health-glow); outline-offset: -2px; }
 
 .orb-face {
   position: relative;
@@ -144,23 +144,40 @@ h1, h2, p { margin: 0; }
   isolation: isolate;
   display: grid;
   place-items: center;
+  --orb-health-deep: var(--orb-brand-deep);
+  --orb-health-edge: var(--orb-brand-edge);
+  --orb-health-glow: var(--orb-brand-glow);
+  --orb-liquid-top: rgba(150, 226, 184, 0.32);
+  --orb-liquid-bottom: rgba(6, 173, 86, 0.4);
   width: 72px;
   height: 72px;
   padding: 0;
-  border: 2px solid var(--orb-brand-edge);
+  border: 2px solid var(--orb-health-edge);
   border-radius: 50%;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.82) 0, rgba(246, 252, 248, 0.7) 58%, rgba(232, 246, 238, 0.74) 100%);
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
-.orb-face.status-normal { border-color: var(--orb-brand-edge); }
-.orb-face.status-warning { border-color: rgba(218, 139, 0, .65); background: linear-gradient(145deg, #fffdf7 0, #fff6df 100%); }
-.orb-face.status-danger { border-color: rgba(207, 72, 59, .68); background: linear-gradient(145deg, #fffafa 0, #ffebe7 100%); }
-.orb-face.status-warning .orb-liquid { background: linear-gradient(180deg, rgba(255, 206, 91, .35), rgba(230, 150, 20, .45)); }
-.orb-face.status-danger .orb-liquid { background: linear-gradient(180deg, rgba(255, 139, 113, .3), rgba(211, 70, 57, .45)); }
-.orb-face.status-normal .orb-label, .orb-face.status-normal .orb-reading > strong { color: var(--vp-text-1); }
-.orb-face.status-warning .orb-label, .orb-face.status-warning .orb-reading > strong { color: #a96600; }
-.orb-face.status-danger .orb-label, .orb-face.status-danger .orb-reading > strong { color: #b23c32; }
+.orb-face.status-warning {
+  --orb-health-deep: #a96600;
+  --orb-health-edge: rgba(218, 139, 0, .65);
+  --orb-health-glow: rgba(232, 147, 12, 0.34);
+  --orb-liquid-top: rgba(255, 206, 91, .35);
+  --orb-liquid-bottom: rgba(230, 150, 20, .45);
+  border-color: var(--orb-health-edge);
+  background: linear-gradient(145deg, #fffdf7 0, #fff6df 100%);
+}
+.orb-face.status-danger {
+  --orb-health-deep: #b23c32;
+  --orb-health-edge: rgba(207, 72, 59, .68);
+  --orb-health-glow: rgba(217, 70, 55, 0.34);
+  --orb-liquid-top: rgba(255, 139, 113, .3);
+  --orb-liquid-bottom: rgba(211, 70, 57, .45);
+  border-color: var(--orb-health-edge);
+  background: linear-gradient(145deg, #fffafa 0, #ffebe7 100%);
+}
+.orb-face.status-warning .orb-label, .orb-face.status-warning .orb-reading > strong,
+.orb-face.status-danger .orb-label, .orb-face.status-danger .orb-reading > strong { color: var(--orb-health-deep); }
 
 .overlay:hover .orb-face { border-color: rgba(6, 173, 86, 0.58); }
 .overlay:hover .orb-face.status-normal { border-color: rgba(6, 173, 86, 0.58); }
@@ -184,7 +201,7 @@ h1, h2, p { margin: 0; }
   bottom: 0;
   left: 0;
   min-height: 0;
-  background: linear-gradient(180deg, rgba(150, 226, 184, 0.32), rgba(6, 173, 86, 0.4));
+  background: linear-gradient(180deg, var(--orb-liquid-top), var(--orb-liquid-bottom));
   box-shadow: inset 0 10px 16px rgba(255, 255, 255, 0.22);
   clip-path: polygon(0 9px, 12% 5px, 25% 2px, 38% 5px, 50% 9px, 63% 6px, 75% 2px, 88% 4px, 100% 8px, 100% 100%, 0 100%);
   transition: height 0.7s cubic-bezier(0.22, 1, 0.36, 1);
@@ -283,21 +300,11 @@ h1, h2, p { margin: 0; }
   overflow: hidden;
   border: 1px solid rgba(6, 173, 86, 0.22);
   border-left: 0;
-  border-radius: 13px;
+  border-radius: 0 13px 13px 0;
   background: linear-gradient(110deg, rgba(238, 250, 244, 0.78), rgba(255, 255, 255, 0.68));
-  clip-path: path('M 0 0 H 83 Q 96 0 96 13 V 33 Q 96 46 83 46 H 0 C 7 39 12 31 12 23 C 12 15 7 7 0 0 Z');
+  /* 左缘用与悬浮球同心同径（r=36，圆心在条内坐标 (-24, 23)）的圆弧精确贴合球体轮廓 */
+  clip-path: path('M 3.7 46 A 36 36 0 0 0 3.7 0 H 83 Q 96 0 96 13 V 33 Q 96 46 83 46 Z');
   transition: border-color 0.2s ease, background-color 0.2s ease;
-}
-
-.orb-network-strip::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -12px;
-  width: 24px;
-  height: 46px;
-  border-right: 1px solid rgba(6, 173, 86, 0.22);
-  border-radius: 50%;
 }
 
 .overlay:hover .orb-network-strip { border-color: rgba(6, 173, 86, 0.34); background: rgba(244, 252, 248, 0.84); }

@@ -9,7 +9,7 @@ import { connect, isIP } from 'node:net'
 import { homedir, networkInterfaces } from 'node:os'
 import { collectBaseMetrics } from './collectors/base'
 import { MetricSampler } from './collectors/sampler'
-import { collectNvidiaMetrics } from './collectors/nvidia'
+import { collectGpuMetricsWithBackoff } from './collectors/nvidia'
 import { collectLinuxTemperature } from './collectors/linux-temperature'
 import { collectPlatformTelemetry } from './collectors/platform-telemetry'
 import { collectHardwareProfile } from './collectors/hardware-profile'
@@ -832,7 +832,7 @@ app.whenReady().then(() => {
   tray.on('click', openToolbox)
   tray.on('double-click', openToolbox)
   updateTray()
-  const sampler = new MetricSampler([collectBaseMetrics, collectNvidiaMetrics, collectLinuxTemperature, collectPlatformTelemetry])
+  const sampler = new MetricSampler([collectBaseMetrics, collectGpuMetricsWithBackoff, collectLinuxTemperature, collectPlatformTelemetry])
   const publish = async (): Promise<void> => {
     const metrics = await sampler.collectOnce()
     const displaySection = hardwareProfile?.sections.find((section) => section.key === 'display')
