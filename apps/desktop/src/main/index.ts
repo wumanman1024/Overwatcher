@@ -1,5 +1,7 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeImage, net as electronNet, screen, Tray } from 'electron'
 import type { HardwareProfile, MetricSnapshot } from '@localforge/shared/metrics'
+import { validateModelInput } from '@localforge/shared/model-config'
+import type { ModelConfigInput } from '@localforge/shared/model-config'
 import { basename, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { copyFile, lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
@@ -19,6 +21,8 @@ import { loadOverlayPreferences, saveOverlayPreferences } from './overlay-store'
 import { clampPosition, selectWorkAreaForPosition, sizeForOverlayMode } from '@localforge/shared/overlay-state'
 import { ensureSingleInstance } from './startup'
 import { installMainErrorLogging } from './runtime-errors'
+import { registerLlmIpc } from './llm-bridge'
+import { deleteModel, listModels, saveModel, setDefaultModel } from './model-store'
 
 installMainErrorLogging()
 let tray: Tray | undefined
@@ -721,10 +725,34 @@ app.whenReady().then(() => {
     return { path }
   })
 
+  // 大模型调用统一从主进程出网；地址/密钥由渲染层随请求带入，此处不落盘。
+  registerLlmIpc()
+
+  // 模型配置读写本地 SQLite（userData/localforge.db）。
+  ipcMain.handle('model-configs:list', () => listModels())
+  ipcMain.handle('model-configs:save', (_event, request: unknown) => {
+    const { input, id } = request as { input?: unknown; id?: unknown }
+    if (input === undefined) throw new Error('模型配置无效')
+    const error = validateModelInput(input as ModelConfigInput)
+    if (error) throw new Error(error)
+    return saveModel(input as ModelConfigInput, typeof id === 'string' ? id : undefined)
+  })
+  ipcMain.handle('model-configs:delete', (_event, request: unknown) => {
+    const { id } = request as { id?: unknown }
+    if (typeof id !== 'string' || !id) throw new Error('缺少模型标识')
+    deleteModel(id)
+  })
+  ipcMain.handle('model-configs:set-default', (_event, request: unknown) => {
+    const { id } = request as { id?: unknown }
+    if (typeof id !== 'string' || !id) throw new Error('缺少模型标识')
+    setDefaultModel(id)
+  })
+
   ipcMain.handle('toolbox:select-directory', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
     return result.canceled ? undefined : result.filePaths[0]
   })
+
   ipcMain.handle('toolbox:scan-directories', async (_event, request: unknown) => {
     const { rootPath, directoryName } = request as { rootPath?: unknown; directoryName?: unknown }
     if (typeof rootPath !== 'string' || typeof directoryName !== 'string') throw new Error('扫描参数无效')
@@ -827,6 +855,24 @@ app.whenReady().then(() => {
       throw error
     }
     return { directory: batchDirectory, files: saved }
+  })
+
+  ipcMain.handle('menu-sql:save-script', async (event, request: unknown) => {
+    const { fileName, content } = request as { fileName?: unknown; content?: unknown }
+    if (typeof content !== 'string' || !content.trim()) throw new Error('没有可导出的 SQL 内容')
+    if (Buffer.byteLength(content, 'utf8') > 2 * 1024 * 1024) throw new Error('SQL 脚本不能超过 2 MB')
+    const suggested = typeof fileName === 'string' && /^[a-z0-9][a-z0-9._-]*$/i.test(basename(fileName)) ? basename(fileName) : 'sys_menu.sql'
+    const options: Electron.SaveDialogOptions = {
+      title: '导出菜单 SQL',
+      defaultPath: suggested.endsWith('.sql') ? suggested : `${suggested}.sql`,
+      filters: [{ name: 'SQL 脚本', extensions: ['sql'] }, { name: '所有文件', extensions: ['*'] }]
+    }
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options)
+    if (result.canceled || !result.filePath) return undefined
+    const outputPath = resolve(result.filePath)
+    await writeFile(outputPath, content, 'utf8')
+    return { path: outputPath }
   })
 
   tray = new Tray(nativeImage.createFromPath(trayIconPath()).resize({ width: 32, height: 32 }))

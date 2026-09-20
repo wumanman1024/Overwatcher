@@ -2,6 +2,9 @@ packages:
   - apps/*
   - packages/*
 
+# better-sqlite3 的原生模块必须针对 Electron 的 ABI 编译，而不是 Node 的；
+# 因此这里禁止它在安装期自行编译，统一由 apps/desktop 的 postinstall 跑 electron-rebuild。
 allowBuilds:
+  better-sqlite3: false
   electron: true
   esbuild: true

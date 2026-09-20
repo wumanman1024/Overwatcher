@@ -1,4 +1,5 @@
 import type { MetricSnapshot } from '@localforge/shared/metrics'
+import type { LlmChatResult, LlmTestResult, ModelConfig, ModelConfigInput } from '@localforge/shared/model-config'
 
 declare global {
   type CleanupTarget = { id: string; path: string }
@@ -25,6 +26,22 @@ declare global {
     nodeReleaseTools?: { list(): Promise<NodeRelease[]>; installManager(manager: 'volta' | 'nvm'): Promise<VoltaNodeState | NvmNodeState> }
     assistantConfig?: { read(tool: AssistantPromptTool, file: AssistantConfigFile): Promise<AssistantConfigResult>; save(tool: AssistantPromptTool, file: AssistantConfigFile, content: string): Promise<{ path: string }> }
     screenColorPicker?: { pick(): Promise<string>; preview(point: { x: number; y: number }): Promise<{ color: string; preview: string }>; choose(point: { x: number; y: number }): void; cancel(): void }
+    menuSqlTools?: { saveScript(request: { fileName?: string; content: string }): Promise<{ path: string } | undefined> }
+    modelConfigs?: {
+      list(): Promise<ModelConfig[]>
+      save(input: ModelConfigInput, id?: string): Promise<ModelConfig>
+      remove(id: string): Promise<void>
+      setDefault(id: string): Promise<void>
+    }
+    llmTools?: {
+      test(config: ModelConfig): Promise<LlmTestResult>
+      chat(request: { config: ModelConfig; messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> }): Promise<LlmChatResult>
+      chatStream(request: { config: ModelConfig; messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>): {
+        onChunk(callback: (delta: string) => void): () => void
+        onDone(callback: (finishReason?: string) => void): () => void
+        onError(callback: (error: string) => void): () => void
+      }
+    }
   }
 }
 

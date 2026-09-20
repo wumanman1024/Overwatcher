@@ -3,15 +3,18 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import SvgIcon from './components/SvgIcon.vue'
+import ModelManagerDialog from './components/ModelManagerDialog.vue'
+import { initModels } from './use-models'
 
-type ToolCategory = 'all' | 'file' | 'data' | 'network' | 'design'
+type ToolCategory = 'all' | 'file' | 'data' | 'agent' | 'design' | 'network'
 const savedCategory = localStorage.getItem('localforge:default-category')
-const initialCategory: ToolCategory = savedCategory === 'file' || savedCategory === 'data' || savedCategory === 'network' || savedCategory === 'design' ? savedCategory : 'all'
+const initialCategory: ToolCategory = savedCategory === 'file' || savedCategory === 'data' || savedCategory === 'agent' || savedCategory === 'network' || savedCategory === 'design' ? savedCategory : 'all'
 const savedIndent = Number(localStorage.getItem('localforge:json-indent'))
 const route = useRoute()
 const router = useRouter()
 const activeCategory = ref<ToolCategory>(initialCategory)
 const settingsOpen = ref(false)
+const modelManagerOpen = ref(false)
 const isMaximized = ref(false)
 const defaultCategory = ref<ToolCategory>(initialCategory)
 const settingsDefaultCategory = ref<ToolCategory>(initialCategory)
@@ -23,6 +26,7 @@ const categories: Array<{ id: ToolCategory; label: string }> = [
   { id: 'all', label: '全部工具' },
   { id: 'file', label: '文件工具' },
   { id: 'data', label: '数据工具' },
+  { id: 'agent', label: '智能体' },
   { id: 'design', label: '设计工具' },
   { id: 'network', label: '网络工具' }
 ]
@@ -60,9 +64,10 @@ const saveSettings = () => {
 }
 
 watch(() => route.query.category, (category) => {
-  activeCategory.value = category === 'file' || category === 'data' || category === 'network' || category === 'design' || category === 'all' ? category : initialCategory
+  activeCategory.value = category === 'file' || category === 'data' || category === 'agent' || category === 'network' || category === 'design' || category === 'all' ? category : initialCategory
 }, { immediate: true })
 void refreshLocalIpv4()
+void initModels()
 void window.windowControls.isMaximized().then((value) => { isMaximized.value = value })
 </script>
 
@@ -80,7 +85,7 @@ void window.windowControls.isMaximized().then((value) => { isMaximized.value = v
       <aside class="toolbox-sidebar">
         <div class="toolbox-brand"><span>⌘</span><div><p>TOOLS</p><h1>工具分类</h1></div></div>
         <nav aria-label="工具列表">
-          <button v-for="category in categories" :key="category.id" :class="{ active: activeTool === 'portal' && activeCategory === category.id }" @click="showPortal(category.id)"><SvgIcon class="sidebar-icon" :name="category.id === 'all' ? 'dashboard' : category.id === 'file' ? 'folder' : category.id === 'data' ? 'code' : category.id === 'design' ? 'palette' : 'globe'" />{{ category.label }}</button>
+          <button v-for="category in categories" :key="category.id" :class="{ active: activeTool === 'portal' && activeCategory === category.id }" @click="showPortal(category.id)"><SvgIcon class="sidebar-icon" :name="category.id === 'all' ? 'dashboard' : category.id === 'file' ? 'folder' : category.id === 'data' ? 'code' : category.id === 'agent' ? 'agent' : category.id === 'design' ? 'palette' : 'globe'" />{{ category.label }}</button>
         </nav>
         <section class="sidebar-local-ip" aria-label="本机 IPv4 地址">
           <div><small>局域网 IPv4</small><strong v-for="item in localIpv4.lan" :key="`lan-${item.name}-${item.address}`" :title="`${item.name} · 点击复制`" @click="copyLocalIpv4(item.address)">{{ item.address }}</strong><span v-if="!localIpv4.lan.length">{{ localIpv4Message }}</span></div>
@@ -88,6 +93,7 @@ void window.windowControls.isMaximized().then((value) => { isMaximized.value = v
         </section>
         <div class="sidebar-actions">
           <button type="button" title="打开系统监控" aria-label="打开系统监控" @click="openMonitor"><SvgIcon name="monitor"/><span>系统监控</span></button>
+          <button class="settings-action" type="button" title="管理大模型" aria-label="模型管理" @click="modelManagerOpen = true"><SvgIcon name="agent"/><span>模型管理</span></button>
           <button class="settings-action" type="button" title="打开设置" aria-label="打开设置" @click="openSettings"><SvgIcon name="settings"/><span>设置</span></button>
         </div>
       </aside>
@@ -102,5 +108,6 @@ void window.windowControls.isMaximized().then((value) => { isMaximized.value = v
         <footer><button type="button" @click="settingsOpen = false">取消</button><button class="primary" type="button" @click="saveSettings">保存设置</button></footer>
       </section>
     </div>
+    <ModelManagerDialog v-if="modelManagerOpen" @close="modelManagerOpen = false" />
   </main>
 </template>

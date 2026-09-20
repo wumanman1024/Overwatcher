@@ -21,6 +21,7 @@ import NetworkDiagnosisTool from './tools/NetworkDiagnosisTool.vue'
 import VoltaTool from './tools/VoltaTool.vue'
 import NvmTool from './tools/NvmTool.vue'
 import AssistantPromptTool from './tools/AssistantPromptTool.vue'
+import MenuSqlTool from './tools/MenuSqlTool.vue'
 
 export const router = createRouter({
   history: createMemoryHistory(),
@@ -46,6 +47,7 @@ export const router = createRouter({
     { path: '/network-diagnosis', name: 'network-diagnosis', component: NetworkDiagnosisTool },
     { path: '/volta', name: 'volta', component: VoltaTool },
     { path: '/nvm', name: 'nvm', component: NvmTool },
-    { path: '/assistant-prompt', name: 'assistant-prompt', component: AssistantPromptTool }
+    { path: '/assistant-prompt', name: 'assistant-prompt', component: AssistantPromptTool },
+    { path: '/menu-sql', name: 'menu-sql', component: MenuSqlTool }
   ]
 })

@@ -78,3 +78,40 @@ contextBridge.exposeInMainWorld('screenColorPicker', {
   choose: (point: { x: number; y: number }) => ipcRenderer.send('screen-color:choose', point),
   cancel: () => ipcRenderer.send('screen-color:cancel')
 })
+
+contextBridge.exposeInMainWorld('menuSqlTools', {
+  saveScript: (request: { fileName?: string; content: string }) => ipcRenderer.invoke('menu-sql:save-script', request)
+})
+
+// 模型配置的增删改查，落到主进程的 SQLite；渲染层不直接碰数据库。
+contextBridge.exposeInMainWorld('modelConfigs', {
+  list: () => ipcRenderer.invoke('model-configs:list'),
+  save: (input: unknown, id?: string) => ipcRenderer.invoke('model-configs:save', { input, id }),
+  remove: (id: string) => ipcRenderer.invoke('model-configs:delete', { id }),
+  setDefault: (id: string) => ipcRenderer.invoke('model-configs:set-default', { id })
+})
+
+// 只转发配置，模型地址/密钥由渲染层传入，preload 不保存任何东西。
+contextBridge.exposeInMainWorld('llmTools', {
+  test: (config: unknown) => ipcRenderer.invoke('llm:test', { config }),
+  chat: (request: unknown) => ipcRenderer.invoke('llm:chat', request),
+  chatStream: (request: { config: unknown; messages: unknown }) => {
+    const requestId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+    // 三个通道全进程共享，靠 requestId 区分本次调用；每个订阅都返回只解绑自己的闭包。
+    const subscribe = <T extends { requestId?: string }>(channel: string, callback: (payload: T) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, payload: unknown) => {
+        const event = payload as T
+        if (event?.requestId === requestId) callback(event)
+      }
+      ipcRenderer.on(channel, listener)
+      return () => ipcRenderer.removeListener(channel, listener)
+    }
+    ipcRenderer.send('llm:chat-stream', { ...request, requestId })
+    type StreamPayload = { requestId?: string; delta?: string; finishReason?: string; error?: string }
+    return {
+      onChunk: (callback: (delta: string) => void) => subscribe<StreamPayload>('llm:chunk', (payload) => callback(payload.delta ?? '')),
+      onDone: (callback: (finishReason?: string) => void) => subscribe<StreamPayload>('llm:done', (payload) => callback(payload.finishReason)),
+      onError: (callback: (error: string) => void) => subscribe<StreamPayload>('llm:error', (payload) => callback(payload.error ?? '模型调用失败'))
+    }
+  }
+})
