@@ -277,6 +277,16 @@ async function removeDirectory(path: string): Promise<void> {
   await rm(path, { recursive: true, force: true, maxRetries: 4, retryDelay: 200 })
 }
 
+/*
+ * Windows 上窗口每次 show()/焦点切换后可能重新注册任务栏按钮，构造参数里的
+ * skipTaskbar 只保证首次显示。悬浮类窗口每次 show 后重放一次，避免用完再显示时冒出任务栏入口。
+ */
+function keepOffTaskbar(window: BrowserWindow): void {
+  const enforce = (): void => { if (!window.isDestroyed()) window.setSkipTaskbar(true) }
+  window.on('show', enforce)
+  window.on('focus', enforce)
+}
+
 function createOrbWindow(): BrowserWindow {
   const window = new BrowserWindow({
     ...sizeForOverlayMode('orb'),
@@ -300,6 +310,7 @@ function createOrbWindow(): BrowserWindow {
     window.setPosition(position.x, position.y)
     window.show()
   })
+  keepOffTaskbar(window)
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -333,6 +344,7 @@ function createPanelWindow(): BrowserWindow {
     window.setPosition(position.x, position.y)
     window.show()
   })
+  keepOffTaskbar(window)
   if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?surface=panel`)
   else void window.loadFile(join(__dirname, '../renderer/index.html'), { query: { surface: 'panel' } })
   return window
@@ -426,6 +438,7 @@ function createTrendWindow(): BrowserWindow {
     window.setPosition(position.x, position.y)
     window.show()
   })
+  keepOffTaskbar(window)
   if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?surface=trend`)
   else void window.loadFile(join(__dirname, '../renderer/index.html'), { query: { surface: 'trend' } })
   return window
