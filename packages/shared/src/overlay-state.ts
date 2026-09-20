@@ -4,7 +4,7 @@ export interface Position { x: number; y: number }
 export interface Size { width: number; height: number }
 export interface WorkArea extends Position, Size {}
 
-const orbSize: Size = { width: 164, height: 72 }
+const orbSize: Size = { width: 168, height: 72 }
 const expandedSize: Size = { width: 1060, height: 740 }
 
 export function sizeForOverlayMode(mode: OverlayMode): Size {

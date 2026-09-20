@@ -20,6 +20,8 @@ const isToolboxSurface = new URLSearchParams(location.search).get('surface') ===
 const isExpanded = ref(isPanelSurface)
 const activeMetricIndex = ref(0)
 const isRotationPaused = ref(false)
+const isMetricPinned = ref(false)
+const isHovering = ref(false)
 const isWindowMaximized = ref(false)
 let rotationInterval: ReturnType<typeof setInterval> | undefined
 let drag: { x: number; y: number; screenX: number; screenY: number } | undefined
@@ -36,7 +38,7 @@ onMounted(async () => {
     reportRendererError('首次读取监控数据失败，等待下一次更新', error)
   }
   rotationInterval = setInterval(() => {
-    if (!isRotationPaused.value && !isExpanded.value) activeMetricIndex.value = (activeMetricIndex.value + 1) % orbMetrics.length
+    if (!isRotationPaused.value && !isMetricPinned.value && !isExpanded.value) activeMetricIndex.value = (activeMetricIndex.value + 1) % orbMetrics.length
   }, 2500)
   if (isPanelSurface) isWindowMaximized.value = await window.windowControls.isMaximized()
 })
@@ -80,8 +82,10 @@ const activeFill = computed(() => metricProgress(activeMetricValue.value ?? { av
 const activeMetricHealth = computed(() => metricHealth(activeMetric.value.key, activeMetricValue.value))
 const networkDown = computed(() => metricExtraDisplay(snapshot.value?.network, '下载'))
 const networkUp = computed(() => metricExtraDisplay(snapshot.value?.network, '上传'))
-const pauseRotation = () => { isRotationPaused.value = true }
-const handlePointerLeave = () => { isRotationPaused.value = false }
+const pauseRotation = () => { isRotationPaused.value = true; isHovering.value = true }
+const handlePointerLeave = () => { isRotationPaused.value = false; isHovering.value = false }
+const stepMetric = (delta: number) => { activeMetricIndex.value = (activeMetricIndex.value + delta + orbMetrics.length) % orbMetrics.length }
+const togglePin = () => { isMetricPinned.value = !isMetricPinned.value }
 </script>
 
 <template>
@@ -113,8 +117,15 @@ const handlePointerLeave = () => { isRotationPaused.value = false }
       </div>
     </div>
     <aside v-if="snapshot && !isPanelSurface && (networkDown || networkUp)" class="orb-network-strip" aria-label="网络速率">
-      <span v-if="networkDown"><i>↓</i><strong>{{ networkDown.value }}<small v-if="networkDown.unit">{{ networkDown.unit }}</small></strong></span>
-      <span v-if="networkUp"><i>↑</i><strong>{{ networkUp.value }}<small v-if="networkUp.unit">{{ networkUp.unit }}</small></strong></span>
+      <div class="orb-net-rates">
+        <span v-if="networkDown"><i>↓</i><strong>{{ networkDown.value }}<small v-if="networkDown.unit">{{ networkDown.unit }}</small></strong></span>
+        <span v-if="networkUp"><i>↑</i><strong>{{ networkUp.value }}<small v-if="networkUp.unit">{{ networkUp.unit }}</small></strong></span>
+      </div>
+      <div class="orb-controls" :class="{ visible: isHovering }" @pointerdown.stop @pointerup.stop>
+        <button type="button" class="orb-step" aria-label="上一个指标" title="上一个指标" @click.stop="stepMetric(-1)"><i>▲</i></button>
+        <button type="button" class="orb-pin" :class="{ on: isMetricPinned }" :aria-pressed="isMetricPinned" :aria-label="isMetricPinned ? '取消固定指标' : '固定当前指标'" :title="isMetricPinned ? '取消固定指标' : '固定当前指标'" @click.stop="togglePin"><i class="orb-pin-box"></i></button>
+        <button type="button" class="orb-step" aria-label="下一个指标" title="下一个指标" @click.stop="stepMetric(1)"><i>▼</i></button>
+      </div>
     </aside>
 
     <div class="expanded-content">

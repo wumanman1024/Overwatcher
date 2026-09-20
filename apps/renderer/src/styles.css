@@ -9,6 +9,11 @@
   --vp-text-2: rgba(60, 60, 67, 0.72);
   --vp-text-3: rgba(60, 60, 67, 0.48);
   --vp-divider: rgba(60, 60, 67, 0.12);
+  /* 悬浮球沿用应用绿色主色 */
+  --orb-brand: #06ad56;
+  --orb-brand-deep: #078f46;
+  --orb-brand-edge: rgba(6, 173, 86, 0.42);
+  --orb-brand-glow: rgba(6, 173, 86, 0.36);
   color: var(--vp-text-1);
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-synthesis: none;
@@ -117,7 +122,7 @@ h1, h2, p { margin: 0; }
 
 .overlay {
   position: relative;
-  width: 164px;
+  width: 168px;
   height: 72px;
   padding: 0;
   overflow: hidden;
@@ -131,7 +136,7 @@ h1, h2, p { margin: 0; }
 }
 
 .overlay:active { cursor: grabbing; }
-.overlay:focus-visible .orb-face { outline: 2px solid rgba(100, 108, 255, 0.36); outline-offset: -2px; }
+.overlay:focus-visible .orb-face { outline: 2px solid var(--orb-brand-glow); outline-offset: -2px; }
 
 .orb-face {
   position: relative;
@@ -142,13 +147,13 @@ h1, h2, p { margin: 0; }
   width: 72px;
   height: 72px;
   padding: 0;
-  border: 2px solid rgba(86, 114, 205, 0.42);
+  border: 2px solid var(--orb-brand-edge);
   border-radius: 50%;
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.82) 0, rgba(247, 247, 252, 0.7) 58%, rgba(238, 240, 248, 0.74) 100%);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.82) 0, rgba(246, 252, 248, 0.7) 58%, rgba(232, 246, 238, 0.74) 100%);
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
-.orb-face.status-normal { border-color: rgba(86, 114, 205, 0.42); }
+.orb-face.status-normal { border-color: var(--orb-brand-edge); }
 .orb-face.status-warning { border-color: rgba(218, 139, 0, .65); background: linear-gradient(145deg, #fffdf7 0, #fff6df 100%); }
 .orb-face.status-danger { border-color: rgba(207, 72, 59, .68); background: linear-gradient(145deg, #fffafa 0, #ffebe7 100%); }
 .orb-face.status-warning .orb-liquid { background: linear-gradient(180deg, rgba(255, 206, 91, .35), rgba(230, 150, 20, .45)); }
@@ -157,8 +162,8 @@ h1, h2, p { margin: 0; }
 .orb-face.status-warning .orb-label, .orb-face.status-warning .orb-reading > strong { color: #a96600; }
 .orb-face.status-danger .orb-label, .orb-face.status-danger .orb-reading > strong { color: #b23c32; }
 
-.overlay:hover .orb-face { border-color: rgba(86, 114, 205, 0.4); }
-.overlay:hover .orb-face.status-normal { border-color: rgba(86, 114, 205, .4); }
+.overlay:hover .orb-face { border-color: rgba(6, 173, 86, 0.58); }
+.overlay:hover .orb-face.status-normal { border-color: rgba(6, 173, 86, 0.58); }
 .overlay:hover .orb-face.status-warning { border-color: rgba(218, 139, 0, .78); }
 .overlay:hover .orb-face.status-danger { border-color: rgba(207, 72, 59, .8); }
 
@@ -179,7 +184,7 @@ h1, h2, p { margin: 0; }
   bottom: 0;
   left: 0;
   min-height: 0;
-  background: linear-gradient(180deg, rgba(136, 205, 255, 0.28), rgba(91, 173, 237, 0.38));
+  background: linear-gradient(180deg, rgba(150, 226, 184, 0.32), rgba(6, 173, 86, 0.4));
   box-shadow: inset 0 10px 16px rgba(255, 255, 255, 0.22);
   clip-path: polygon(0 9px, 12% 5px, 25% 2px, 38% 5px, 50% 9px, 63% 6px, 75% 2px, 88% 4px, 100% 8px, 100% 100%, 0 100%);
   transition: height 0.7s cubic-bezier(0.22, 1, 0.36, 1);
@@ -204,7 +209,7 @@ h1, h2, p { margin: 0; }
   justify-content: center;
   gap: 4px;
   width: 100%;
-  color: var(--vp-brand-1);
+  color: var(--orb-brand-deep);
   font-size: 7px;
   font-weight: 750;
   letter-spacing: 0.14em;
@@ -256,7 +261,7 @@ h1, h2, p { margin: 0; }
 
 .orb-reading > strong small {
   margin-left: 3px;
-  color: var(--vp-brand-2);
+  color: var(--orb-brand-deep);
   font-size: 8px;
   font-weight: 650;
   letter-spacing: 0;
@@ -270,18 +275,17 @@ h1, h2, p { margin: 0; }
   z-index: 1;
   top: 13px;
   left: 60px;
-  display: grid;
-  align-content: center;
-  gap: 2px;
-  width: 104px;
+  display: flex;
+  align-items: center;
+  width: 108px;
   height: 46px;
-  padding: 5px 7px 5px 22px;
+  padding: 5px 6px 5px 19px;
   overflow: hidden;
-  border: 1px solid rgba(86, 114, 205, 0.2);
+  border: 1px solid rgba(6, 173, 86, 0.22);
   border-left: 0;
   border-radius: 13px;
-  background: linear-gradient(110deg, rgba(240, 246, 255, 0.76), rgba(255, 255, 255, 0.68));
-  clip-path: path('M 0 0 H 91 Q 104 0 104 13 V 33 Q 104 46 91 46 H 0 C 7 39 12 31 12 23 C 12 15 7 7 0 0 Z');
+  background: linear-gradient(110deg, rgba(238, 250, 244, 0.78), rgba(255, 255, 255, 0.68));
+  clip-path: path('M 0 0 H 95 Q 108 0 108 13 V 33 Q 108 46 95 46 H 0 C 7 39 12 31 12 23 C 12 15 7 7 0 0 Z');
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
@@ -292,16 +296,78 @@ h1, h2, p { margin: 0; }
   left: -12px;
   width: 24px;
   height: 46px;
-  border-right: 1px solid rgba(86, 114, 205, 0.2);
+  border-right: 1px solid rgba(6, 173, 86, 0.22);
   border-radius: 50%;
 }
 
-.overlay:hover .orb-network-strip { border-color: rgba(86, 114, 205, 0.32); background: rgba(248, 251, 255, 0.82); }
-.orb-network-strip > span { display: flex; align-items: baseline; min-width: 0; gap: 4px; height: 15px; white-space: nowrap; }
-.orb-network-strip > span > i { flex: 0 0 8px; color: var(--vp-brand-2); font-size: 11px; font-style: normal; font-weight: 850; line-height: 1; text-align: center; }
-.orb-network-strip > span + span > i { color: var(--vp-warm); }
-.orb-network-strip strong { min-width: 0; overflow: hidden; color: var(--vp-text-1); font: 650 12px/1 "D-DIN", DDIN, "DIN Alternate", "Bahnschrift SemiCondensed", sans-serif; font-variant-numeric: tabular-nums lining-nums; letter-spacing: -0.035em; text-overflow: clip; }
-.orb-network-strip strong small { margin-left: 3px; color: var(--vp-text-3); font-size: 6px; font-weight: 700; letter-spacing: 0; }
+.overlay:hover .orb-network-strip { border-color: rgba(6, 173, 86, 0.34); background: rgba(244, 252, 248, 0.84); }
+.orb-net-rates { display: grid; flex: 1; min-width: 0; align-content: center; gap: 1px; }
+.orb-net-rates > span { display: flex; align-items: baseline; min-width: 0; gap: 3px; height: 16px; white-space: nowrap; }
+.orb-net-rates > span > i { flex: 0 0 8px; color: var(--orb-brand-deep); font-size: 11px; font-style: normal; font-weight: 850; line-height: 1; text-align: center; }
+.orb-net-rates > span + span > i { color: var(--vp-warm); }
+.orb-net-rates strong { min-width: 0; overflow: hidden; color: var(--vp-text-1); font: 650 14px/1 "D-DIN", DDIN, "DIN Alternate", "Bahnschrift SemiCondensed", sans-serif; font-variant-numeric: tabular-nums lining-nums; letter-spacing: -0.035em; text-overflow: clip; }
+.orb-net-rates strong small { margin-left: 2px; color: var(--vp-text-3); font-size: 8px; font-weight: 700; letter-spacing: 0; }
+
+/* 网速条右端纵向一排：切换指标 / 固定，悬停时淡入 */
+.orb-controls {
+  display: grid;
+  flex: 0 0 13px;
+  align-content: center;
+  gap: 1px;
+  margin-left: 2px;
+  border-left: 1px solid rgba(6, 173, 86, 0.16);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.16s ease, visibility 0.16s ease;
+}
+.orb-controls.visible { opacity: 1; visibility: visible; }
+
+.orb-step {
+  display: grid;
+  place-items: center;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--orb-brand-deep);
+  cursor: pointer;
+}
+.orb-step > i { font-size: 6px; font-style: normal; line-height: 1; }
+.orb-step:hover { background: rgba(6, 173, 86, 0.16); }
+
+.orb-pin {
+  display: grid;
+  place-items: center;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+.orb-pin:hover { background: rgba(6, 173, 86, 0.16); }
+.orb-pin-box {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--orb-brand-edge);
+  border-radius: 2px;
+  background: #fff;
+}
+.orb-pin.on .orb-pin-box { border-color: var(--orb-brand); background: var(--orb-brand); }
+.orb-pin.on .orb-pin-box::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1.5px;
+  width: 3px;
+  height: 1.5px;
+  border: 1px solid #fff;
+  border-top: 0;
+  border-right: 0;
+  transform: rotate(-45deg);
+}
 
 .metric-swap-enter-active, .metric-swap-leave-active { transition: opacity 0.18s ease; }
 .metric-swap-enter-from, .metric-swap-leave-to { opacity: 0; }

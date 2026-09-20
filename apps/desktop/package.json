@@ -12,7 +12,7 @@
     "build": "electron-vite build",
     "package": "pnpm run build && electron-builder --publish never",
     "package:win": "pnpm run build && electron-builder --win nsis --publish never",
-    "package:portable": "pnpm run build && electron-builder --win portable --publish never --config.win.signAndEditExecutable=false",
+    "package:portable": "pnpm run build && electron-builder --win portable --publish never",
     "package:mac": "pnpm run build && electron-builder --mac dmg --publish never",
     "package:linux": "pnpm run build && electron-builder --linux AppImage deb --publish never",
     "preview": "electron-vite preview",
@@ -70,7 +70,6 @@
       "maintainer": "Hardware Overlay <maintainer@example.invalid>"
     },
     "win": {
-      "signAndEditExecutable": false,
       "target": [
         "nsis"
       ]

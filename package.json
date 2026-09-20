@@ -20,3 +20,4 @@
     "fix-sandbox": "pnpm --filter @localforge/desktop fix-sandbox"
   }
 }
+
