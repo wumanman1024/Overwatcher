@@ -93,8 +93,8 @@ contextBridge.exposeInMainWorld('modelConfigs', {
 
 // 只转发配置，模型地址/密钥由渲染层传入，preload 不保存任何东西。
 contextBridge.exposeInMainWorld('llmTools', {
-  test: (config: unknown) => ipcRenderer.invoke('llm:test', { config }),
-  chat: (request: unknown) => ipcRenderer.invoke('llm:chat', request),
+  test: (config: unknown) => ipcRenderer.invoke('llm:test', { config: plain(config) }),
+  chat: (request: unknown) => ipcRenderer.invoke('llm:chat', plain(request)),
   chatStream: (request: { config: unknown; messages: unknown }) => {
     const requestId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
     // 三个通道全进程共享，靠 requestId 区分本次调用；每个订阅都返回只解绑自己的闭包。
@@ -106,7 +106,7 @@ contextBridge.exposeInMainWorld('llmTools', {
       ipcRenderer.on(channel, listener)
       return () => ipcRenderer.removeListener(channel, listener)
     }
-    ipcRenderer.send('llm:chat-stream', { ...request, requestId })
+    ipcRenderer.send('llm:chat-stream', plain({ ...request, requestId }))
     type StreamPayload = { requestId?: string; delta?: string; finishReason?: string; error?: string }
     return {
       onChunk: (callback: (delta: string) => void) => subscribe<StreamPayload>('llm:chunk', (payload) => callback(payload.delta ?? '')),

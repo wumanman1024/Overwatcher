@@ -54,3 +54,5 @@ export const DRAFT_STORAGE_KEY = 'localforge:menu-sql-draft'
 export const DRAFT_OPTIONS_KEY = 'localforge:menu-sql-options'
 /** 粘贴进来的中文菜单树原文，与生成结果分开存，改文案不会丢已生成的树。 */
 export const DRAFT_SOURCE_KEY = 'localforge:menu-sql-source'
+/** 树形编辑器里的名称结构（序列化为 markdown 文本存，与粘贴源同一份表达）。 */
+export const DRAFT_NAMES_KEY = 'localforge:menu-sql-names'

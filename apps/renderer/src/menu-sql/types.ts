@@ -22,14 +22,22 @@ export interface MenuNode {
   children: MenuNode[]
 }
 
+/** 主键来源：雪花 ID（现网惯例）、表自增、手工连续号。 */
+export type MenuIdMode = 'snowflake' | 'auto' | 'manual'
+
 export interface SqlOptions {
   /** 授权目标角色的 role_key，逗号分隔；为空则不生成 sys_role_menu 段落。 */
   roleKeys: string
   /** 生成范围：整棵树或仅当前节点及其子树。 */
   scope: 'all' | 'branch'
-  /** sys_menu.menu_id 非自增时手工指定起始 ID。 */
-  manualIds: boolean
+  /** menu_id 的生成方式。 */
+  menuIdMode: MenuIdMode
+  /** menuIdMode 为 manual 时的起始 ID。 */
   manualStartId: number
+  /** 为每个页面菜单自动补齐 查询/新增/修改/删除 四个按钮。 */
+  crudButtons: boolean
+  /** create_by / update_by 的落款账号；留空则整列省略，交给库默认值或触发器。 */
+  createBy: string
 }
 
 export type IssueLevel = 'error' | 'warning'

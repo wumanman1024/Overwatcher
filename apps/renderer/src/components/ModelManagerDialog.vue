@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { REASONING_EFFORT_LABEL, REASONING_EFFORTS, validateModelInput } from '@localforge/shared/model-config'
 import type { ModelConfig, ModelConfigInput } from '@localforge/shared/model-config'
 import { useModels } from '../use-models'
+import { plain } from '../plain'
 import SvgIcon from './SvgIcon.vue'
 
 const emit = defineEmits<{ close: [] }>()
@@ -88,7 +89,7 @@ const test = async (model: ModelConfig) => {
   testing[model.id] = 'pending'
   testDetail[model.id] = ''
   try {
-    const result = await window.llmTools!.test(model)
+    const result = await window.llmTools!.test(plain(model))
     testing[model.id] = result.ok ? 'ok' : 'fail'
     testDetail[model.id] = result.ok ? (result.count === undefined ? '可访问' : `${result.count} 个模型`) : (result.error || '不可访问')
   } catch (error) {

@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import ToolboxPage from '../ToolboxPage.vue'
-import { DRAFT_OPTIONS_KEY, DRAFT_SOURCE_KEY, DRAFT_STORAGE_KEY, FLAG_LABELS, MENU_ICONS, MENU_TYPE_LABEL } from '../menu-sql/constants'
+import { DRAFT_NAMES_KEY, DRAFT_OPTIONS_KEY, DRAFT_SOURCE_KEY, DRAFT_STORAGE_KEY, FLAG_LABELS, MENU_ICONS, MENU_TYPE_LABEL } from '../menu-sql/constants'
 import { buildTree, buildUserPrompt, SYSTEM_PROMPT } from '../menu-sql/llm'
-import { countByDepth, parseMenuText } from '../menu-sql/parse-tree'
 import { addChild, createNode, derivePermsPrefix, deriveRouteName, findNode, locate, moveSibling, nextOrderNum, normalizeOrder, removeNode, updateNode } from '../menu-sql/model'
+import {
+  addChildLine, addRootLine, addSiblingLine, canIndentLine, canMoveEditorLine, countByDepth, editorLinesFromText,
+  indentLine, linkEditorLines, moveEditorLine, outdentLine, removeEditorLine, serializeMenuText
+} from '../menu-sql/parse-tree'
 import { generateSql } from '../menu-sql/sql'
 import { summarize, validateMenuTree } from '../menu-sql/validate'
 import { useModels } from '../use-models'
+import { plain } from '../plain'
+import type { EditorLine } from '../menu-sql/parse-tree'
 import type { MenuNode, MenuType, SqlOptions } from '../menu-sql/types'
 
 const router = useRouter()
@@ -20,13 +25,13 @@ const { models, activeModel, setActive, ready: modelsReady, loadError: modelsErr
 const menuTree = ref<MenuNode[]>([])
 const selectedId = ref('')
 const collapsed = ref<Set<string>>(new Set())
-const sqlOptions = reactive<SqlOptions>({ roleKeys: '', scope: 'all', manualIds: false, manualStartId: 1 })
+const sqlOptions = reactive<SqlOptions>({ roleKeys: '', scope: 'all', menuIdMode: 'snowflake', manualStartId: 1, crudButtons: true, createBy: 'admin' })
 const message = ref('粘贴中文菜单树，一键生成 sys_menu 的 MySQL 脚本；内容只保存在本机。')
 const fileName = ref('sys_menu.sql')
 const draftFileInput = ref<HTMLInputElement>()
 let draftTimer: ReturnType<typeof setTimeout> | undefined
 
-/* ---------- 粘贴文本 → 大模型命名 → 菜单树 ---------- */
+/* ---------- 菜单结构：一行一个节点（名称 + 层级），两种编辑方式共享同一份数据 ---------- */
 const PASTE_PLACEHOLDER = `- 系统管理
   - 用户管理
     - 用户查询
@@ -37,27 +42,106 @@ const PASTE_PLACEHOLDER = `- 系统管理
 - 监控中心
   - 缓存监控`
 
+/** 真源：两种编辑模式（树 / 文本）最终都落到这份扁平的「名称 + 深度」序列上。 */
+const menuNames = ref<EditorLine[]>([])
+const entryMode = ref<'tree' | 'text'>('tree')
+/** 文本模式专用的编辑缓冲，切模式时与 menuNames 双向搬运，避免两个来源互相打摆。 */
 const sourceText = ref('')
+/** 正在输入的行的 id，用于回车续行后把光标落到新行。 */
+const activeLineId = ref('')
+const nameInputs = new Map<string, HTMLInputElement>()
+
+// 空名称行是树编辑时的占位，不送去命名；丢弃后按剩余行的深度重新推导父子（与文本模式丢弃空行对齐）。
+const parsedLines = computed(() => linkEditorLines(menuNames.value.filter((line) => line.name.trim())))
+const parsedStat = computed(() => countByDepth(parsedLines.value))
+const hasSource = computed(() => parsedStat.value.total > 0)
+
+const setName = (id: string, name: string) => {
+  menuNames.value = menuNames.value.map((line) => (line.id === id ? { ...line, name } : line))
+}
+
+const indentOf = (id: string) => menuNames.value.find((line) => line.id === id)?.depth ?? 0
+const canIndent = (id: string) => canIndentLine(menuNames.value, id)
+const canOutdent = (id: string) => indentOf(id) > 0
+const canUp = (id: string) => canMoveEditorLine(menuNames.value, id, -1)
+const canDown = (id: string) => canMoveEditorLine(menuNames.value, id, 1)
+
+/** 结构操作统一入口：改完把 focusAfterId 那根行的光标接过来（新增/删除后落点各不相同）。 */
+const runOp = (op: (lines: EditorLine[]) => EditorLine[], focusAfterId?: string) => {
+  const before = new Set(menuNames.value.map((line) => line.id))
+  menuNames.value = op(menuNames.value)
+  if (focusAfterId) void focusLine(focusAfterId)
+  else {
+    const added = menuNames.value.find((line) => !before.has(line.id))
+    if (added) void focusLine(added.id)
+  }
+}
+const addRoot = () => runOp(addRootLine)
+const addChildRow = (id: string) => runOp((lines) => addChildLine(lines, id))
+const addRowBelow = (id: string) => runOp((lines) => addSiblingLine(lines, id))
+/** 回车补同级、Tab 补子级（Shift+Tab 补升级后的同级），与常见树编辑器的键位一致。 */
+const addIndent = (id: string, shift: boolean) => {
+  if (shift) { runOp((lines) => outdentLine(lines, id)); runOp((lines) => addSiblingLine(lines, id)) }
+  else runOp((lines) => addChildLine(lines, id))
+}
+const deleteRow = (id: string) => {
+  const index = menuNames.value.findIndex((line) => line.id === id)
+  if (index === -1) return
+  // 删除落点：先找被删子树之后的下一行，树尾则回落到上一行。
+  const end = subtreeEndOf(index)
+  const nextId = menuNames.value[end]?.id ?? menuNames.value[index - 1]?.id ?? ''
+  runOp((lines) => removeEditorLine(lines, id), nextId)
+}
+/** 第 index 行连同子树的右开区间终点（与 parse-tree 同一深度约定）。 */
+function subtreeEndOf(index: number): number {
+  let end = index + 1
+  while (end < menuNames.value.length && menuNames.value[end].depth > menuNames.value[index].depth) end += 1
+  return end
+}
+const indentRow = (id: string) => { menuNames.value = indentLine(menuNames.value, id) }
+const outdentRow = (id: string) => { menuNames.value = outdentLine(menuNames.value, id) }
+const moveRow = (id: string, delta: number) => { menuNames.value = moveEditorLine(menuNames.value, id, delta) }
+
+/** 输入框在 v-for 里，得等 Vue 把新行 patch 出来再聚焦。 */
+const focusLine = async (id: string) => {
+  if (!id) return
+  activeLineId.value = id
+  await nextTick()
+  nameInputs.get(id)?.focus()
+}
+const registerInput = (id: string, element: Element | null) => {
+  const input = element as HTMLInputElement | null
+  if (input) nameInputs.set(id, input)
+  else nameInputs.delete(id)
+}
+
+/** 树模式 → 文本模式：把结构反写回 markdown，用户看到的是同一棵树。 */
+const switchMode = (mode: 'tree' | 'text') => {
+  if (mode === entryMode.value) return
+  if (mode === 'text') sourceText.value = serializeMenuText(menuNames.value)
+  entryMode.value = mode
+}
+
+/** 文本模式下 textarea 是唯一编辑面：任何改动即时解析回真源，保证「生成」读到的永远是最新的树。 */
+watch(sourceText, (text) => {
+  if (entryMode.value === 'text') menuNames.value = editorLinesFromText(text)
+})
+
 const generating = ref(false)
 /** 上一次生成时的微调区快照，用于判断用户是否手动改过、重新生成前要不要确认。 */
 let lastGeneratedJson = ''
 
-const parsedLines = computed(() => parseMenuText(sourceText.value))
-const parsedStat = computed(() => countByDepth(parsedLines.value))
-const hasSource = computed(() => parsedStat.value.total > 0)
-
 async function generate() {
-  if (!hasSource.value) { message.value = '先粘贴菜单树再生成。'; return }
+  if (!hasSource.value) { message.value = '先填写菜单结构再生成。'; return }
   if (!window.llmTools) { message.value = 'AI 组件未加载，请重启应用。'; return }
   const config = activeModel.value
   if (!config) { message.value = '尚未配置模型，请先点左下角「模型管理」添加。'; return }
   if (hasTree.value && JSON.stringify(menuTree.value) !== lastGeneratedJson && !window.confirm('微调区里的改动会被生成结果覆盖，继续吗？')) return
 
   generating.value = true
-  generateProgress.value = `正在请求 ${config.name} 为 ${parsedStat.value.total} 个节点命名…`
   try {
     const result = await window.llmTools.chat({
-      config,
+      config: plain(config),
       messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: buildUserPrompt(parsedLines.value) }]
     })
     const outcome = buildTree(parsedLines.value, result.content)
@@ -74,13 +158,12 @@ async function generate() {
     message.value = `生成失败：${error instanceof Error ? error.message : String(error)}`
   } finally {
     generating.value = false
-    generateProgress.value = ''
   }
 }
 
 /** 离线兜底：不调模型，纯英文树也能直接规范化生成；中文名会落占位标识并在微调区提示修正。 */
 function generateOffline() {
-  if (!hasSource.value) { message.value = '先粘贴菜单树再生成。'; return }
+  if (!hasSource.value) { message.value = '先填写菜单结构再生成。'; return }
   if (hasTree.value && JSON.stringify(menuTree.value) !== lastGeneratedJson && !window.confirm('微调区里的改动会被生成结果覆盖，继续吗？')) return
   const outcome = buildTree(parsedLines.value, JSON.stringify({ nodes: [] }))
   menuTree.value = outcome.tree
@@ -233,9 +316,10 @@ const loadSample = () => {
 }
 
 const clearAll = () => {
-  const hadAnything = hasTree.value || !!sourceText.value
-  if (hadAnything && !window.confirm('清空粘贴的菜单树与已生成的节点？')) return
+  const hadAnything = hasTree.value || hasSource.value || !!sourceText.value
+  if (hadAnything && !window.confirm('清空菜单结构与已生成的节点？')) return
   menuTree.value = []
+  menuNames.value = []
   sourceText.value = ''
   lastGeneratedJson = ''
   selectedId.value = ''
@@ -243,6 +327,13 @@ const clearAll = () => {
 }
 
 const exportJson = () => download(`${fileName.value.replace(/\.sql$/i, '') || 'menu'}.json`, JSON.stringify({ version: 1, tree: menuTree.value, options: sqlOptions }, null, 2), 'application/json')
+
+/** 旧草稿/旧导出只有 manualIds 布尔：迁移到三选的 menuIdMode。 */
+const applySavedOptions = (saved: Partial<SqlOptions> & { manualIds?: boolean }) => {
+  if (saved.menuIdMode === undefined && saved.manualIds !== undefined) saved.menuIdMode = saved.manualIds ? 'manual' : 'auto'
+  delete saved.manualIds
+  Object.assign(sqlOptions, saved)
+}
 
 const importJson = async (event: Event) => {
   const input = event.target as HTMLInputElement
@@ -252,7 +343,7 @@ const importJson = async (event: Event) => {
     const parsed = JSON.parse(await file.text()) as { tree?: unknown; options?: Partial<SqlOptions> }
     if (!Array.isArray(parsed.tree)) throw new Error('文件里找不到 tree 数组')
     menuTree.value = reviveTree(parsed.tree)
-    if (parsed.options) Object.assign(sqlOptions, parsed.options)
+    if (parsed.options) applySavedOptions(parsed.options)
     selectedId.value = ''
     message.value = `已导入 ${countTree(menuTree.value)} 个菜单节点。`
   } catch (error) {
@@ -314,6 +405,16 @@ function download(name: string, content: string, mime: string) {
 onMounted(() => {
   try {
     sourceText.value = localStorage.getItem(DRAFT_SOURCE_KEY) ?? ''
+    // 名称结构优先于旧草稿：有则进树模式直接编辑，没有则沿用文本模式，兼容老数据。
+    const rawNames = localStorage.getItem(DRAFT_NAMES_KEY)
+    if (rawNames !== null) {
+      menuNames.value = editorLinesFromText(rawNames)
+      entryMode.value = 'tree'
+    } else if (sourceText.value) {
+      // 老草稿只有粘贴文本：直接进文本模式，并同步解析一次，别让生成读到空树。
+      entryMode.value = 'text'
+      menuNames.value = editorLinesFromText(sourceText.value)
+    }
     const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
     if (raw) {
       menuTree.value = reviveTree(JSON.parse(raw))
@@ -322,7 +423,7 @@ onMounted(() => {
       if (menuTree.value.length) message.value = `已恢复上次编辑的 ${countTree(menuTree.value)} 个菜单节点。`
     }
     const rawOptions = localStorage.getItem(DRAFT_OPTIONS_KEY)
-    if (rawOptions) Object.assign(sqlOptions, JSON.parse(rawOptions))
+    if (rawOptions) applySavedOptions(JSON.parse(rawOptions) as Partial<SqlOptions> & { manualIds?: boolean })
   } catch {
     message.value = '上次草稿读取失败，已从空白开始。'
   }
@@ -332,6 +433,7 @@ watch(menuTree, (tree) => {
   draftTimer = setTimeout(() => localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(tree)), 500)
 }, { deep: true })
 watch(sourceText, (text) => localStorage.setItem(DRAFT_SOURCE_KEY, text))
+watch(menuNames, (lines) => localStorage.setItem(DRAFT_NAMES_KEY, serializeMenuText(lines)), { deep: true })
 watch(sqlOptions, (options) => localStorage.setItem(DRAFT_OPTIONS_KEY, JSON.stringify(options)), { deep: true })
 onBeforeUnmount(() => clearTimeout(draftTimer))
 
@@ -344,16 +446,50 @@ const typeModel = computed({
 <template>
   <ToolboxPage>
     <header class="toolbox-heading">
-      <div><p>智能体 / 菜单 SQL</p><h2>菜单管理 SQL 生成器</h2><span>粘贴中文菜单树，由大模型自动译出英文标识并生成 sys_menu 的 MySQL 脚本；数据只存在本机。</span></div>
+      <div><p>智能体 / 菜单 SQL</p><h2>菜单管理 SQL 生成器</h2><span>在树里直接搭出中文菜单层级（或粘贴文本），由大模型自动译出英文标识并生成 sys_menu 的 MySQL 脚本；数据只存在本机。</span></div>
       <button class="back-button" @click="backToPortal">‹ 返回工具列表</button>
     </header>
 
     <section class="menu-paste">
       <div class="menu-paste-head">
         <strong>菜单结构</strong>
-        <small>支持 markdown 缩进列表，缩进用空格或 Tab，# 开头为注释</small>
+        <div class="menu-mode-switch" role="tablist">
+          <button :class="{ active: entryMode === 'tree' }" @click="switchMode('tree')">直接编辑</button>
+          <button :class="{ active: entryMode === 'text' }" @click="switchMode('text')">粘贴文本</button>
+        </div>
+        <small v-if="entryMode === 'tree'">回车补同级 · Tab 降级 / Shift+Tab 升级 · 子级按钮挂子节点</small>
+        <small v-else>支持 markdown 缩进列表，缩进用空格或 Tab，# 开头为注释</small>
       </div>
-      <textarea v-model="sourceText" class="menu-source" spellcheck="false" :placeholder="PASTE_PLACEHOLDER"></textarea>
+
+      <div v-if="entryMode === 'tree'" class="menu-names">
+        <button v-if="!menuNames.length" type="button" class="menu-names-empty" @click="addRoot">
+          <b>＋ 添加第一个一级节点</b>
+          <small>从「系统管理」这样的顶级目录开始搭层级</small>
+        </button>
+        <div v-for="(line, index) in menuNames" :key="line.id" class="menu-name-row" :class="{ active: line.id === activeLineId }" :style="{ marginLeft: `${line.depth * 26}px` }">
+          <em class="menu-tier" :class="`tier-${Math.min(line.depth, 2)}`">{{ index + 1 }}</em>
+          <input
+            :value="line.name"
+            :ref="(element) => registerInput(line.id, element)"
+            class="menu-name-input"
+            :placeholder="line.depth === 0 ? '一级目录，如：系统管理' : '子级名称，如：岗位管理'"
+            @input="setName(line.id, ($event.target as HTMLInputElement).value)"
+            @focus="activeLineId = line.id"
+            @keydown.enter.prevent="addRowBelow(line.id)"
+            @keydown.tab.prevent="addIndent(line.id, $event.shiftKey)"
+          />
+          <span class="menu-line-actions">
+            <button type="button" title="添加子节点" @click="addChildRow(line.id)">＋子级</button>
+            <button type="button" title="降级（Shift+Tab）" :disabled="!canIndent(line.id)" @click="indentRow(line.id)">⇥</button>
+            <button type="button" title="升级" :disabled="!canOutdent(line.id)" @click="outdentRow(line.id)">⇤</button>
+            <button type="button" title="上移" :disabled="!canUp(line.id)" @click="moveRow(line.id, -1)">↑</button>
+            <button type="button" title="下移" :disabled="!canDown(line.id)" @click="moveRow(line.id, 1)">↓</button>
+            <button type="button" class="danger" title="删除该节点及其子节点" @click="deleteRow(line.id)">✕</button>
+          </span>
+        </div>
+        <button v-if="menuNames.length" type="button" class="menu-add-root" @click="addRoot">＋ 添加一级节点</button>
+      </div>
+      <textarea v-else v-model="sourceText" class="menu-source" spellcheck="false" :placeholder="PASTE_PLACEHOLDER"></textarea>
 
       <div class="menu-generate">
         <label class="menu-model-pick">使用模型
@@ -494,8 +630,10 @@ const typeModel = computed({
         <div class="json-actions">
           <label>范围 <select v-model="sqlOptions.scope"><option value="all">全部</option><option value="branch">选中分支</option></select></label>
           <label class="menu-roles">授权角色<input v-model="sqlOptions.roleKeys" placeholder="admin，逗号分隔" /></label>
-          <label class="menu-manual"><input v-model="sqlOptions.manualIds" type="checkbox" /> 手工指定 ID</label>
-          <label v-if="sqlOptions.manualIds">起始 ID<input v-model.number="sqlOptions.manualStartId" type="number" min="1" /></label>
+          <label>主键 <select v-model="sqlOptions.menuIdMode"><option value="snowflake">雪花 ID</option><option value="auto">表自增</option><option value="manual">手工连续号</option></select></label>
+          <label v-if="sqlOptions.menuIdMode === 'manual'">起始 ID<input v-model.number="sqlOptions.manualStartId" type="number" min="1" /></label>
+          <label class="menu-manual"><input v-model="sqlOptions.crudButtons" type="checkbox" /> 自动补增删改查按钮</label>
+          <label class="menu-author">落款账号<input v-model="sqlOptions.createBy" placeholder="admin" title="写入 create_by / update_by；留空则省略这两列" /></label>
           <label>文件名<input v-model="fileName" class="menu-filename" placeholder="sys_menu.sql" /></label>
           <button class="primary" @click="copySql">复制 SQL</button>
           <button @click="saveFile">导出 .sql</button>

@@ -1,4 +1,5 @@
 import { useModels } from './use-models'
+import { plain } from './plain'
 
 export type ChatRole = 'system' | 'user' | 'assistant'
 export interface ChatMessage { role: ChatRole; content: string }
@@ -11,11 +12,11 @@ function requireModel() {
   const config = activeModel.value
   if (!config) throw missingModel()
   if (!window.llmTools) throw missingBridge()
-  return config
+  return plain(config)
 }
 
 function toMessages(input: ChatMessage[] | string): ChatMessage[] {
-  return typeof input === 'string' ? [{ role: 'user', content: input }] : input
+  return plain(typeof input === 'string' ? [{ role: 'user', content: input }] : input)
 }
 
 /** 非流式调用，返回完整文本。菜单 SQL 这类要一次性拿结构化结果的场景用这个。 */
