@@ -51,6 +51,15 @@ function assertConfigOnly(request: unknown): ModelConfig {
 
 const timeoutOf = (config: ModelConfig) => AbortSignal.timeout(config.timeoutMs || DEFAULT_TIMEOUT_MS)
 
+/** 把 fetch/读流的异常翻译成人话：AbortSignal.timeout 触发的是 TimeoutError/AbortError，原样抛出只有 "This operation was aborted"，用户无从下手。 */
+const friendlyFetchError = (config: ModelConfig, error: unknown): Error => {
+  const name = error instanceof Error || error instanceof DOMException ? (error as { name?: string }).name ?? '' : ''
+  if (name === 'TimeoutError' || name === 'AbortError') {
+    return new Error(`模型服务在 ${Math.round((config.timeoutMs || DEFAULT_TIMEOUT_MS) / 1000)} 秒内未返回完整结果，可在「模型管理」调大超时时间、把思考强度调低，或减少一次生成的节点数`)
+  }
+  return new Error(`连接模型服务失败：${error instanceof Error ? error.message : String(error)}`)
+}
+
 /** 连通性测试：打 /models 列出可用模型，供界面上的状态灯使用。 */
 async function testConnection(config: ModelConfig): Promise<LlmTestResult> {
   try {

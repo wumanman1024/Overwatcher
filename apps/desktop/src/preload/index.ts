@@ -1,6 +1,10 @@
 import { contextBridge } from 'electron'
 import { ipcRenderer } from 'electron'
 
+// preload 是独立于渲染进程的 bundle，拿不到 renderer 里的 plain；且此处 Vue Proxy 已被
+// contextBridge 拆成普通对象，只需 JSON 往返兜住嵌套里可能残留的非可克隆值，无需 toRaw。
+const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+
 contextBridge.exposeInMainWorld('hardwareMonitor', {
   getSnapshot: () => ipcRenderer.invoke('monitor:get-snapshot'),
   getHistory: () => ipcRenderer.invoke('monitor:get-history'),
