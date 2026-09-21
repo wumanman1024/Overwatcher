@@ -137,35 +137,23 @@ function assertNodeSpecifier(value: unknown): string {
   return specifier
 }
 
-type NvmAvailableRelease = { version: string; channel: 'CURRENT' | 'LTS' | 'OLD STABLE' | 'OLD UNSTABLE' }
-let nvmAvailableReleaseCache: { expiresAt: number; releases: NvmAvailableRelease[] } | undefined
+type NodeAvailableRelease = { version: string; channel: 'CURRENT' | 'LTS' | 'OLD STABLE' | 'OLD UNSTABLE' }
 
-async function getNvmDownloadableNodeReleases(): Promise<NvmAvailableRelease[]> {
-  if (nvmAvailableReleaseCache && nvmAvailableReleaseCache.expiresAt > Date.now()) return nvmAvailableReleaseCache.releases
-  const response = await electronNet.fetch('https://nodejs.org/dist/index.json', { signal: AbortSignal.timeout(15_000) })
-  if (!response.ok) throw new Error(`Node.js 发布目录响应异常（${response.status}）`)
-  const payload = await response.json() as unknown
-  if (!Array.isArray(payload)) throw new Error('Node.js 发布目录返回了意外的数据格式')
-  const latestVersion = payload.find((item) => item && typeof item === 'object' && typeof (item as { version?: unknown }).version === 'string') as { version?: string } | undefined
-  const currentMajor = latestVersion?.version?.replace(/^v/, '').split('.')[0]
-  const releases = payload.slice(0, 300).flatMap((item) => {
-    if (!item || typeof item !== 'object') return []
-    const release = item as { version?: unknown; lts?: unknown }
-    const version = typeof release.version === 'string' ? release.version.replace(/^v/, '') : ''
-    if (!/^\d+\.\d+\.\d+$/.test(version)) return []
-    const channel: NvmAvailableRelease['channel'] = release.lts ? 'LTS' : version.split('.')[0] === currentMajor ? 'CURRENT' : 'OLD UNSTABLE'
-    return [{ version, channel }]
-  })
-  if (!releases.length) throw new Error('Node.js 发布目录没有返回可用版本')
-  nvmAvailableReleaseCache = { releases, expiresAt: Date.now() + 15 * 60_000 }
-  return releases
+// 写死当前处于 LTS 支持期的主版本（每个主版本取已核实的最新可安装版），不再动态拉取 nodejs.org。
+// 依据 https://nodejs.org/en/about/previous-releases 的 LTS 时间表，2026-09 核实更新。
+const PINNED_NODE_LTS_RELEASES: NodeAvailableRelease[] = [
+  { version: '24.21.0', channel: 'LTS' }, // Active LTS (Krypton)
+  { version: '22.23.2', channel: 'LTS' } // Maintenance LTS (Jod)
+]
+
+function getDownloadableNodeReleases(): NodeAvailableRelease[] {
+  return PINNED_NODE_LTS_RELEASES
 }
 
 async function installVersionManager(manager: unknown): Promise<void> {
   if (process.platform !== 'win32') throw new Error('内置安装入口当前仅支持 Windows')
-  const packageId = manager === 'volta' ? 'Volta.Volta' : manager === 'nvm' ? 'CoreyButler.NVMforWindows' : undefined
-  if (!packageId) throw new Error('版本管理工具参数无效')
-  await commandOutput('winget', ['install', '--exact', '--id', packageId, '--accept-package-agreements', '--accept-source-agreements'], { timeoutMs: 10 * 60_000 })
+  if (manager !== 'volta') throw new Error('版本管理工具参数无效')
+  await commandOutput('winget', ['install', '--exact', '--id', 'Volta.Volta', '--accept-package-agreements', '--accept-source-agreements'], { timeoutMs: 10 * 60_000 })
 }
 
 async function getVoltaNodeState(): Promise<{ installed: boolean; voltaVersion?: string; versions: Array<{ version: string; isDefault: boolean }>; defaultVersion?: string; currentVersion?: string; error?: string }> {
@@ -192,27 +180,6 @@ async function getVoltaNodeState(): Promise<{ installed: boolean; voltaVersion?:
       versions: versions.map((item) => ({ ...item, isDefault: item.isDefault || item.version === defaultVersion })),
       defaultVersion,
       currentVersion: voltaVersionFrom(currentOutput)
-    }
-  } catch (error) {
-    return { installed: false, versions: [], error: error instanceof Error ? error.message : String(error) }
-  }
-}
-
-async function getNvmNodeState(): Promise<{ installed: boolean; nvmVersion?: string; versions: Array<{ version: string; isCurrent: boolean }>; currentVersion?: string; error?: string }> {
-  try {
-    const [nvmVersion, listOutput] = await Promise.all([
-      commandOutput('nvm', ['version']),
-      commandOutput('nvm', ['list'])
-    ])
-    const versions = listOutput.split(/\r?\n/).flatMap((line) => {
-      const match = line.match(/^\s*(\*)?\s*v?(\d+(?:\.\d+){0,2})/)
-      return match ? [{ version: match[2], isCurrent: Boolean(match[1]) || /currently using/i.test(line) }] : []
-    })
-    return {
-      installed: true,
-      nvmVersion: nvmVersion.trim(),
-      versions,
-      currentVersion: versions.find((item) => item.isCurrent)?.version
     }
   } catch (error) {
     return { installed: false, versions: [], error: error instanceof Error ? error.message : String(error) }
@@ -680,26 +647,10 @@ app.whenReady().then(() => {
     await commandOutput('volta', ['pin', `node@${normalizedVersion}`], { cwd: projectDirectory, timeoutMs: 10 * 60_000 })
     return { directory: projectDirectory, version: normalizedVersion }
   })
-  ipcMain.handle('nvm:get-node-state', () => getNvmNodeState())
-  ipcMain.handle('nvm:install-node', async (_event, rawVersion: unknown) => {
-    const version = assertNodeSpecifier(rawVersion)
-    await commandOutput('nvm', ['install', version], { timeoutMs: 10 * 60_000 })
-    return getNvmNodeState()
-  })
-  ipcMain.handle('nvm:use-node', async (_event, rawVersion: unknown) => {
-    const version = assertNodeSpecifier(rawVersion)
-    await commandOutput('nvm', ['use', version])
-    return getNvmNodeState()
-  })
-  ipcMain.handle('nvm:uninstall-node', async (_event, rawVersion: unknown) => {
-    const version = assertNodeSpecifier(rawVersion)
-    await commandOutput('nvm', ['uninstall', version])
-    return getNvmNodeState()
-  })
-  ipcMain.handle('node-releases:list', () => getNvmDownloadableNodeReleases())
+  ipcMain.handle('node-releases:list', () => getDownloadableNodeReleases())
   ipcMain.handle('version-manager:install', async (_event, manager: unknown) => {
     await installVersionManager(manager)
-    return manager === 'volta' ? getVoltaNodeState() : getNvmNodeState()
+    return getVoltaNodeState()
   })
 
   ipcMain.handle('assistant-config:read', async (_event, request: unknown) => {

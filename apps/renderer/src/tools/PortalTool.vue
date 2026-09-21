@@ -5,7 +5,7 @@ import ToolboxPage from '../ToolboxPage.vue'
 import SvgIcon from '../components/SvgIcon.vue'
 
 type ToolCategory = 'all' | 'file' | 'data' | 'agent' | 'design' | 'network'
-type ToolView = 'cleanup' | 'json' | 'data-lab' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image-compress' | 'image-crop' | 'background-remove' | 'screen-color' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'ports' | 'volta' | 'nvm' | 'assistant-prompt' | 'menu-sql'
+type ToolView = 'cleanup' | 'json' | 'data-lab' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image-compress' | 'image-crop' | 'background-remove' | 'screen-color' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'ports' | 'volta' | 'assistant-prompt' | 'menu-sql'
 const route = useRoute()
 const router = useRouter()
 const savedCategory = localStorage.getItem('localforge:default-category')
@@ -31,7 +31,6 @@ const portalTools: Array<{ id: ToolView; category: Exclude<ToolCategory, 'all'>;
   { id: 'ip-check', category: 'network', title: 'IP 与代理检测', description: '检测当前出口公网 IP，确认代理或 VPN 是否实际生效。', state: '网络工具' },
   { id: 'network-diagnosis', category: 'network', title: '网络诊断', description: 'DNS 解析、TCP 端口及 HTTP/HTTPS 连通性检查。', state: '网络工具' },
   { id: 'volta', category: 'data', title: 'Volta Node 管理', description: '查看、安装默认 Node 版本，或为项目固定版本。', state: '数据工具' },
-  { id: 'nvm', category: 'data', title: 'NVM Node 管理', description: '查看可下载版本、安装、切换或移除 NVM Node。', state: '数据工具' },
   { id: 'assistant-prompt', category: 'data', title: 'AI 提示词与配置', description: '编辑 Codex、Cursor、Claude Code 的全局提示词和配置文件。', state: '数据工具' },
   { id: 'menu-sql', category: 'agent', title: '菜单 SQL 生成器', description: '粘贴中文菜单树，AI 译出英文标识并生成 sys_menu 插入脚本。', state: '智能体' }
 ]

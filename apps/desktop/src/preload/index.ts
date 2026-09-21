@@ -52,13 +52,6 @@ contextBridge.exposeInMainWorld('voltaTools', {
   pinNode: (version: string, directory: string) => ipcRenderer.invoke('volta:pin-node', { version, directory })
 })
 
-contextBridge.exposeInMainWorld('nvmTools', {
-  getNodeState: () => ipcRenderer.invoke('nvm:get-node-state'),
-  installNode: (version: string) => ipcRenderer.invoke('nvm:install-node', version),
-  useNode: (version: string) => ipcRenderer.invoke('nvm:use-node', version),
-  uninstallNode: (version: string) => ipcRenderer.invoke('nvm:uninstall-node', version)
-})
-
 contextBridge.exposeInMainWorld('assistantConfig', {
   read: (tool: string, file: 'prompt' | 'config') => ipcRenderer.invoke('assistant-config:read', { tool, file }),
   save: (tool: string, file: 'prompt' | 'config', content: string) => ipcRenderer.invoke('assistant-config:save', { tool, file, content })
@@ -66,7 +59,7 @@ contextBridge.exposeInMainWorld('assistantConfig', {
 
 contextBridge.exposeInMainWorld('nodeReleaseTools', {
   list: () => ipcRenderer.invoke('node-releases:list'),
-  installManager: (manager: 'volta' | 'nvm') => ipcRenderer.invoke('version-manager:install', manager)
+  installManager: (manager: 'volta') => ipcRenderer.invoke('version-manager:install', manager)
 })
 
 contextBridge.exposeInMainWorld('windowControls', {

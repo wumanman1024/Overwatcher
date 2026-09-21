@@ -9,7 +9,6 @@ declare global {
   type ListeningProcess = { protocol: string; address: string; port: number; pid: number; name: string }
   type NetworkDiagnosis = { host: string; port: number; mode: 'tcp' | 'http' | 'https'; addresses: string[]; dnsError?: string; ipv4: string[]; ipv6: string[]; tcp: { reachable: boolean; latencyMs?: number; error?: string }; http?: { reachable: boolean; status?: number; statusText?: string; latencyMs?: number; error?: string } }
   type VoltaNodeState = { installed: boolean; voltaVersion?: string; versions: Array<{ version: string; isDefault: boolean }>; defaultVersion?: string; currentVersion?: string; error?: string }
-  type NvmNodeState = { installed: boolean; nvmVersion?: string; versions: Array<{ version: string; isCurrent: boolean }>; currentVersion?: string; error?: string }
   type NodeRelease = { version: string; channel: 'CURRENT' | 'LTS' | 'OLD STABLE' | 'OLD UNSTABLE' }
   type AssistantPromptTool = 'codex' | 'cursor' | 'claude-code'
   type AssistantConfigFile = 'prompt' | 'config'
@@ -22,8 +21,7 @@ declare global {
     networkTools?: { getLocalIpv4(): Promise<{ lan: LocalIpv4[]; wired: LocalIpv4[] }>; detectExitIp(): Promise<ExitIpResult>; diagnose(host: string, port: number, mode: 'tcp' | 'http' | 'https'): Promise<NetworkDiagnosis> }
     processTools?: { listListening(): Promise<ListeningProcess[]>; terminate(pid: number): Promise<{ pid: number }> }
     voltaTools?: { getNodeState(): Promise<VoltaNodeState>; installNode(version: string): Promise<VoltaNodeState>; pinNode(version: string, directory: string): Promise<{ directory: string; version: string }> }
-    nvmTools?: { getNodeState(): Promise<NvmNodeState>; installNode(version: string): Promise<NvmNodeState>; useNode(version: string): Promise<NvmNodeState>; uninstallNode(version: string): Promise<NvmNodeState> }
-    nodeReleaseTools?: { list(): Promise<NodeRelease[]>; installManager(manager: 'volta' | 'nvm'): Promise<VoltaNodeState | NvmNodeState> }
+    nodeReleaseTools?: { list(): Promise<NodeRelease[]>; installManager(manager: 'volta'): Promise<VoltaNodeState> }
     assistantConfig?: { read(tool: AssistantPromptTool, file: AssistantConfigFile): Promise<AssistantConfigResult>; save(tool: AssistantPromptTool, file: AssistantConfigFile, content: string): Promise<{ path: string }> }
     screenColorPicker?: { pick(): Promise<string>; preview(point: { x: number; y: number }): Promise<{ color: string; preview: string }>; choose(point: { x: number; y: number }): void; cancel(): void }
     menuSqlTools?: { saveScript(request: { fileName?: string; content: string }): Promise<{ path: string } | undefined> }
