@@ -130,7 +130,7 @@ const togglePin = () => { isMetricPinned.value = !isMetricPinned.value }
 
     <div class="expanded-content">
       <header class="panel-header">
-        <div class="brand-mark" aria-hidden="true"><span></span></div>
+        <div class="brand-mark" aria-hidden="true"><SvgIcon name="app-mark" /></div>
         <div class="panel-title">
           <p>CORE PULSE · LOCAL</p>
           <h1>监控中心</h1>

@@ -74,7 +74,7 @@ void window.windowControls.isMaximized().then((value) => { isMaximized.value = v
 <template>
   <main class="toolbox-shell">
     <header class="toolbox-statusbar">
-      <div class="toolbox-status-brand"><i><b></b><b></b><b></b></i><div><strong>LocalForge</strong><small>LOCAL DEVELOPER UTILITY</small></div></div>
+      <div class="toolbox-status-brand"><i><SvgIcon name="app-mark" /></i><div><strong>LocalForge</strong><small>LOCAL DEVELOPER UTILITY</small></div></div>
       <div class="window-controls" aria-label="窗口控制">
         <button type="button" aria-label="最小化" title="最小化" @click="minimizeWindow"><SvgIcon name="window-minimize" /></button>
         <button type="button" :aria-label="isMaximized ? '还原窗口' : '最大化'" :title="isMaximized ? '还原窗口' : '最大化'" @click="toggleMaximizeWindow"><SvgIcon :name="isMaximized ? 'window-restore' : 'window-maximize'" /></button>
@@ -83,7 +83,7 @@ void window.windowControls.isMaximized().then((value) => { isMaximized.value = v
     </header>
     <div class="toolbox-main">
       <aside class="toolbox-sidebar">
-        <div class="toolbox-brand"><span>⌘</span><div><p>TOOLS</p><h1>工具分类</h1></div></div>
+        <div class="toolbox-brand"><span><SvgIcon name="app-mark" /></span><div><p>TOOLS</p><h1>工具分类</h1></div></div>
         <nav aria-label="工具列表">
           <button v-for="category in categories" :key="category.id" :class="{ active: activeTool === 'portal' && activeCategory === category.id }" @click="showPortal(category.id)"><SvgIcon class="sidebar-icon" :name="category.id === 'all' ? 'dashboard' : category.id === 'file' ? 'folder' : category.id === 'data' ? 'code' : category.id === 'agent' ? 'agent' : category.id === 'design' ? 'palette' : 'globe'" />{{ category.label }}</button>
         </nav>

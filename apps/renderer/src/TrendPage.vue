@@ -25,7 +25,7 @@ const closeTrend = () => window.hardwareMonitor.closeTrend()
 <template>
   <main class="overlay expanded trend-window">
     <header class="panel-header" @pointerdown="startDrag" @pointermove="moveDrag" @pointerup="stopDrag" @pointercancel="stopDrag">
-      <div class="brand-mark" aria-hidden="true"><span></span></div>
+      <div class="brand-mark" aria-hidden="true"><SvgIcon name="app-mark" /></div>
       <div class="panel-title"><p>CORE PULSE · ANALYTICS</p><h1>趋势分析</h1></div>
       <span class="window-caption">60 SECOND HISTORY</span>
       <button class="panel-close" type="button" aria-label="关闭趋势分析" @pointerdown.stop @click.stop="closeTrend"><SvgIcon name="window-close" /></button>
