@@ -5,7 +5,7 @@ import ToolboxPage from '../ToolboxPage.vue'
 import SvgIcon from '../components/SvgIcon.vue'
 
 type ToolCategory = 'all' | 'file' | 'data' | 'agent' | 'design' | 'network'
-type ToolView = 'cleanup' | 'json' | 'data-lab' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image-compress' | 'image-crop' | 'background-remove' | 'screen-color' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'ports' | 'volta' | 'assistant-prompt' | 'menu-sql'
+type ToolView = 'cleanup' | 'json' | 'data-lab' | 'time' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image-compress' | 'image-crop' | 'background-remove' | 'screen-color' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'ports' | 'volta' | 'assistant-prompt' | 'menu-sql'
 const route = useRoute()
 const router = useRouter()
 const savedCategory = localStorage.getItem('localforge:default-category')
@@ -15,6 +15,7 @@ const portalTools: Array<{ id: ToolView; category: Exclude<ToolCategory, 'all'>;
   { id: 'cleanup', category: 'file', title: '批量清理目录', description: '递归扫描并清理 node_modules 或指定名称的目录。', state: '文件工具' },
   { id: 'json', category: 'data', title: 'JSON 格式化', description: '格式化、压缩、键排序与本地校验。', state: '数据工具' },
   { id: 'data-lab', category: 'data', title: '开发数据转换台', description: 'Base64、URL、时间戳与 JWT 的本地转换和解析。', state: '数据工具' },
+  { id: 'time', category: 'data', title: '时间工作台', description: '时间戳与日期互转、时间差计算、日期加减偏移。', state: '数据工具' },
   { id: 'stats', category: 'data', title: '字数统计', description: '统计字符、汉字、英文词、数字、行数与 UTF-8 字节数。', state: '数据工具' },
   { id: 'radix', category: 'data', title: '进制转换', description: '在 2 到 36 进制之间转换任意精度整数。', state: '数据工具' },
   { id: 'bytes', category: 'data', title: '字节单位转换', description: '在 B、KB、MB、GB、TB 间快速换算。', state: '数据工具' },
@@ -47,7 +48,7 @@ const openTool = (tool: ToolView) => router.push({ name: tool })
   <header class="toolbox-heading"><p>LOCALFORGE / TOOL PORTAL</p><h2>{{ portalTitle }}</h2><span>选择一项工具开始工作；本地工具不上传内容，联网工具会明确说明用途。</span></header>
   <section class="portal-list" :aria-label="`${portalTitle}列表`">
     <button v-for="tool in visiblePortalTools" :key="tool.id" class="portal-item" type="button" @click="openTool(tool.id)">
-      <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'menu-sql' ? 'menu-tree' : tool.category === 'data' ? 'code' : tool.id === 'color' || tool.id === 'screen-color' ? 'palette' : tool.category === 'design' ? 'image' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
+      <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'menu-sql' ? 'menu-tree' : tool.id === 'time' ? 'clock' : tool.category === 'data' ? 'code' : tool.id === 'color' || tool.id === 'screen-color' ? 'palette' : tool.category === 'design' ? 'image' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
       <span class="portal-copy"><em>{{ tool.state }}</em><strong>{{ tool.title }}</strong><small>{{ tool.description }}</small></span><b>›</b>
     </button>
     <p v-if="!visiblePortalTools.length" class="portal-empty">该分类暂时没有可用工具。</p>

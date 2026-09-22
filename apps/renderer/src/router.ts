@@ -3,6 +3,7 @@ import PortalTool from './tools/PortalTool.vue'
 import CleanupTool from './tools/CleanupTool.vue'
 import JsonTool from './tools/JsonTool.vue'
 import DataLabTool from './tools/DataLabTool.vue'
+import TimeTool from './tools/TimeTool.vue'
 import StatsTool from './tools/StatsTool.vue'
 import RadixTool from './tools/RadixTool.vue'
 import BytesTool from './tools/BytesTool.vue'
@@ -29,6 +30,7 @@ export const router = createRouter({
     { path: '/cleanup', name: 'cleanup', component: CleanupTool },
     { path: '/json', name: 'json', component: JsonTool },
     { path: '/data-lab', name: 'data-lab', component: DataLabTool },
+    { path: '/time', name: 'time', component: TimeTool },
     { path: '/stats', name: 'stats', component: StatsTool },
     { path: '/radix', name: 'radix', component: RadixTool },
     { path: '/bytes', name: 'bytes', component: BytesTool },
