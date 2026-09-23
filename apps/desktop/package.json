@@ -4,6 +4,7 @@
   "author": {
     "name": "wumanman"
   },
+  "description": "LocalForge 硬件监控与效率工具箱",
   "private": true,
   "main": "./out/main/index.js",
   "type": "module",
@@ -23,7 +24,6 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^4.0.0",
-    "@localforge/shared": "workspace:*",
     "better-sqlite3": "12.11.1",
     "electron-store": "^10.0.0",
     "systeminformation": "^5.24.0"
@@ -55,7 +55,8 @@
     },
     "files": [
       "out/**/*",
-      "package.json"
+      "package.json",
+      "!**/node_modules/@localforge/**"
     ],
     "extraResources": [
       {
