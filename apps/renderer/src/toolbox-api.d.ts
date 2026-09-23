@@ -16,6 +16,10 @@ declare global {
   type NginxStatus = { exeConfigured: boolean; exePath?: string; prefix?: string; paths?: { conf: string; logs: string; html: string }; configExists: boolean; running: boolean; processes: Array<{ pid: number; role: 'master' | 'worker' }>; autostart: boolean; autostartCommand?: string }
   type NginxAction = 'stop' | 'quit' | 'reload' | 'reopen'
   type NginxOpenTarget = 'prefix' | 'confDir' | 'logs' | 'html' | 'config'
+  type FrpcStatus = { exeConfigured: boolean; configConfigured: boolean; ready: boolean; exePath?: string; configPath?: string; configExists: boolean; running: boolean; processes: Array<{ pid: number }>; admin?: { addr: string; port: number; reachable: boolean; requiresAuth: boolean }; autostart: boolean; autostartCommand?: string }
+  type FrpcTunnel = { name: string; type: string; status: string; trafficIn: number; trafficOut: number; todayTraffic: number }
+  type FrpcTunnelsResult = { available: boolean; reason?: string; tunnels: FrpcTunnel[] }
+  type FrpcOpenTarget = 'exeDir' | 'configDir' | 'config'
 
   interface Window {
     developerTools: { selectDirectory(): Promise<string | undefined>; scanDirectories(rootPath: string, directoryName: string): Promise<CleanupTarget[]>; deleteDirectories(ids: string[]): Promise<DeleteResult[]>; selectImageOutputDirectory(): Promise<string | undefined>; saveCompressedImages(outputDirectory: string, files: Array<{ name: string; data: ArrayBuffer }>): Promise<{ directory: string; files: string[] }> }
@@ -27,6 +31,7 @@ declare global {
     nodeReleaseTools?: { list(): Promise<NodeRelease[]>; installManager(manager: 'volta'): Promise<VoltaNodeState> }
     assistantConfig?: { read(tool: AssistantPromptTool, file: AssistantConfigFile): Promise<AssistantConfigResult>; save(tool: AssistantPromptTool, file: AssistantConfigFile, content: string): Promise<{ path: string }> }
     nginxTools?: { status(): Promise<NginxStatus>; browse(): Promise<{ path?: string }>; setPath(path: string): Promise<NginxStatus>; start(): Promise<{ output: string; ok: boolean }>; control(action: NginxAction): Promise<{ output: string; ok: boolean }>; testConfig(): Promise<{ output: string; ok: boolean }>; killAll(): Promise<{ killed: number }>; setAutostart(enabled: boolean): Promise<NginxStatus>; readConfig(): Promise<AssistantConfigResult>; saveConfig(content: string): Promise<{ path: string }>; open(target: NginxOpenTarget): Promise<void> }
+    frpcTools?: { status(): Promise<FrpcStatus>; tunnels(): Promise<FrpcTunnelsResult>; browseExe(): Promise<{ path?: string }>; browseConfig(): Promise<{ path?: string }>; setExe(path: string): Promise<FrpcStatus>; setConfig(path: string): Promise<FrpcStatus>; start(): Promise<{ output: string; ok: boolean }>; stop(): Promise<{ output: string; ok: boolean }>; reload(): Promise<{ output: string; ok: boolean }>; verify(): Promise<{ output: string; ok: boolean }>; killAll(): Promise<{ killed: number }>; setAutostart(enabled: boolean): Promise<FrpcStatus>; readConfig(): Promise<AssistantConfigResult>; saveConfig(content: string): Promise<{ path: string }>; open(target: FrpcOpenTarget): Promise<void> }
     screenColorPicker?: { pick(): Promise<string>; preview(point: { x: number; y: number }): Promise<{ color: string; preview: string }>; choose(point: { x: number; y: number }): void; cancel(): void }
     menuSqlTools?: { saveScript(request: { fileName?: string; content: string }): Promise<{ path: string } | undefined> }
     modelConfigs?: {

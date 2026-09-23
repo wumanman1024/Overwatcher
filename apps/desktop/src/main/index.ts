@@ -23,6 +23,7 @@ import { ensureSingleInstance } from './startup'
 import { installMainErrorLogging } from './runtime-errors'
 import { registerLlmIpc } from './llm-bridge'
 import { registerNginxIpc } from './nginx'
+import { registerFrpcIpc } from './frpc'
 import { deleteModel, listModels, saveModel, setDefaultModel } from './model-store'
 
 installMainErrorLogging()
@@ -682,6 +683,9 @@ app.whenReady().then(() => {
 
   // nginx 进程与配置管理（仅 Windows 生效，各 handler 自行校验平台）。
   registerNginxIpc()
+
+  // frpc 内网穿透客户端管理（仅 Windows 生效，各 handler 自行校验平台）。
+  registerFrpcIpc()
 
   // 模型配置读写本地 SQLite（userData/localforge.db）。
   ipcMain.handle('model-configs:list', () => listModels())

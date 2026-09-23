@@ -20,6 +20,7 @@ import PortsTool from './tools/PortsTool.vue'
 import IpCheckTool from './tools/IpCheckTool.vue'
 import NetworkDiagnosisTool from './tools/NetworkDiagnosisTool.vue'
 import NginxTool from './tools/NginxTool.vue'
+import FrpcTool from './tools/FrpcTool.vue'
 import VoltaTool from './tools/VoltaTool.vue'
 import AssistantPromptTool from './tools/AssistantPromptTool.vue'
 import MenuSqlTool from './tools/MenuSqlTool.vue'
@@ -48,6 +49,7 @@ export const router = createRouter({
     { path: '/ip-check', name: 'ip-check', component: IpCheckTool },
     { path: '/network-diagnosis', name: 'network-diagnosis', component: NetworkDiagnosisTool },
     { path: '/nginx', name: 'nginx', component: NginxTool },
+    { path: '/frpc', name: 'frpc', component: FrpcTool },
     { path: '/volta', name: 'volta', component: VoltaTool },
     { path: '/assistant-prompt', name: 'assistant-prompt', component: AssistantPromptTool },
     { path: '/menu-sql', name: 'menu-sql', component: MenuSqlTool }

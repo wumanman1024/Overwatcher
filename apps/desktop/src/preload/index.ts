@@ -71,6 +71,24 @@ contextBridge.exposeInMainWorld('nginxTools', {
   open: (target: 'prefix' | 'confDir' | 'logs' | 'html' | 'config') => ipcRenderer.invoke('nginx:open', { target })
 })
 
+contextBridge.exposeInMainWorld('frpcTools', {
+  status: () => ipcRenderer.invoke('frpc:status'),
+  tunnels: () => ipcRenderer.invoke('frpc:tunnels'),
+  browseExe: () => ipcRenderer.invoke('frpc:browse-exe'),
+  browseConfig: () => ipcRenderer.invoke('frpc:browse-config'),
+  setExe: (path: string) => ipcRenderer.invoke('frpc:set-exe', { path }),
+  setConfig: (path: string) => ipcRenderer.invoke('frpc:set-config', { path }),
+  start: () => ipcRenderer.invoke('frpc:start'),
+  stop: () => ipcRenderer.invoke('frpc:stop'),
+  reload: () => ipcRenderer.invoke('frpc:reload'),
+  verify: () => ipcRenderer.invoke('frpc:verify'),
+  killAll: () => ipcRenderer.invoke('frpc:kill-all'),
+  setAutostart: (enabled: boolean) => ipcRenderer.invoke('frpc:set-autostart', { enabled }),
+  readConfig: () => ipcRenderer.invoke('frpc:read-config'),
+  saveConfig: (content: string) => ipcRenderer.invoke('frpc:save-config', { content }),
+  open: (target: 'exeDir' | 'configDir' | 'config') => ipcRenderer.invoke('frpc:open', { target })
+})
+
 contextBridge.exposeInMainWorld('nodeReleaseTools', {
   list: () => ipcRenderer.invoke('node-releases:list'),
   installManager: (manager: 'volta') => ipcRenderer.invoke('version-manager:install', manager)
