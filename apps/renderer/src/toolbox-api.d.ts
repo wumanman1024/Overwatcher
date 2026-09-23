@@ -6,6 +6,8 @@ declare global {
   type DeleteResult = { id: string; path?: string; success: boolean; error?: string }
   type ExitIpResult = { ip: string; country: string; city: string; isp: string; timezone: string }
   type LocalIpv4 = { name: string; address: string }
+  // 冻结式取色的整屏快照：RGBA 像素（每像素 4 字节，主进程已从 BGRA 转正）。
+  type DisplaySnapshot = { image: Uint8Array; width: number; height: number }
   type ListeningProcess = { protocol: string; address: string; port: number; pid: number; name: string }
   type NetworkDiagnosis = { host: string; port: number; mode: 'tcp' | 'http' | 'https'; addresses: string[]; dnsError?: string; ipv4: string[]; ipv6: string[]; tcp: { reachable: boolean; latencyMs?: number; error?: string }; http?: { reachable: boolean; status?: number; statusText?: string; latencyMs?: number; error?: string } }
   type VoltaNodeState = { installed: boolean; voltaVersion?: string; versions: Array<{ version: string; isDefault: boolean }>; defaultVersion?: string; currentVersion?: string; error?: string }
@@ -32,7 +34,7 @@ declare global {
     assistantConfig?: { read(tool: AssistantPromptTool, file: AssistantConfigFile): Promise<AssistantConfigResult>; save(tool: AssistantPromptTool, file: AssistantConfigFile, content: string): Promise<{ path: string }> }
     nginxTools?: { status(): Promise<NginxStatus>; browse(): Promise<{ path?: string }>; setPath(path: string): Promise<NginxStatus>; start(): Promise<{ output: string; ok: boolean }>; control(action: NginxAction): Promise<{ output: string; ok: boolean }>; testConfig(): Promise<{ output: string; ok: boolean }>; killAll(): Promise<{ killed: number }>; setAutostart(enabled: boolean): Promise<NginxStatus>; readConfig(): Promise<AssistantConfigResult>; saveConfig(content: string): Promise<{ path: string }>; open(target: NginxOpenTarget): Promise<void> }
     frpcTools?: { status(): Promise<FrpcStatus>; tunnels(): Promise<FrpcTunnelsResult>; browseExe(): Promise<{ path?: string }>; browseConfig(): Promise<{ path?: string }>; setExe(path: string): Promise<FrpcStatus>; setConfig(path: string): Promise<FrpcStatus>; start(): Promise<{ output: string; ok: boolean }>; stop(): Promise<{ output: string; ok: boolean }>; reload(): Promise<{ output: string; ok: boolean }>; verify(): Promise<{ output: string; ok: boolean }>; killAll(): Promise<{ killed: number }>; setAutostart(enabled: boolean): Promise<FrpcStatus>; readConfig(): Promise<AssistantConfigResult>; saveConfig(content: string): Promise<{ path: string }>; open(target: FrpcOpenTarget): Promise<void> }
-    screenColorPicker?: { pick(): Promise<string>; preview(point: { x: number; y: number }): Promise<{ color: string; preview: string }>; choose(point: { x: number; y: number }): void; cancel(): void }
+    screenColorPicker?: { pick(): Promise<string>; snapshot(displayId: number): Promise<DisplaySnapshot>; choose(color: string): void; cancel(): void }
     menuSqlTools?: { saveScript(request: { fileName?: string; content: string }): Promise<{ path: string } | undefined> }
     modelConfigs?: {
       list(): Promise<ModelConfig[]>

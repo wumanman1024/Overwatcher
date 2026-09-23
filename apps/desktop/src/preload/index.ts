@@ -101,10 +101,11 @@ contextBridge.exposeInMainWorld('windowControls', {
   isMaximized: () => ipcRenderer.invoke('window:is-maximized')
 })
 
+// 冻结式取色：snapshot 只在进入取色时每屏取一次，之后取色与放大全在渲染层本地完成。
 contextBridge.exposeInMainWorld('screenColorPicker', {
   pick: () => ipcRenderer.invoke('screen-color:pick'),
-  preview: (point: { x: number; y: number }) => ipcRenderer.invoke('screen-color:preview', point),
-  choose: (point: { x: number; y: number }) => ipcRenderer.send('screen-color:choose', point),
+  snapshot: (displayId: number) => ipcRenderer.invoke('screen-color:snapshot', displayId) as Promise<{ image: Uint8Array; width: number; height: number }>,
+  choose: (color: string) => ipcRenderer.send('screen-color:choose', color),
   cancel: () => ipcRenderer.send('screen-color:cancel')
 })
 

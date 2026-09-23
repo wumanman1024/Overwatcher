@@ -44,9 +44,14 @@ type ListeningProcess = { protocol: string; address: string; port: number; pid: 
 type LocalIpv4 = { name: string; address: string }
 type AssistantConfigTool = 'codex' | 'cursor' | 'claude-code'
 type AssistantConfigFile = 'prompt' | 'config'
+// 冻结式取色：进入时每个显示器各抓一帧快照，之后所有取色与放大都在覆盖层本地完成。
+type DisplaySnapshot = { image: Uint8Array; width: number; height: number }
 type ScreenColorPickerSession = {
   sourceWindow: BrowserWindow
   overlayWindows: BrowserWindow[]
+  snapshots: Map<number, Promise<DisplaySnapshot>>
+  // 已领取快照的显示器，全部到齐才显示覆盖层。
+  ready: Set<number>
   resolve: (color: string) => void
   reject: (error: Error) => void
 }
@@ -361,30 +366,32 @@ function createScreenColorPickerWindow(display: Electron.Display): BrowserWindow
   return window
 }
 
-async function readScreenColor(point: Electron.Point): Promise<{ color: string; preview: string }> {
-  const display = screen.getDisplayNearestPoint(point)
-  const thumbnailSize = {
+/*
+ * 冻结式取色：整屏只抓一次，之后把 RGBA 像素交给覆盖层本地采样，鼠标移动不再有 IPC。
+ * toBitmap 在 Windows 上是 BGRA；这里一次性翻成 RGBA，渲染层可直接 putImageData，
+ * 主进程读色也走同一份 RGBA，预览与最终取色的字节口径完全一致。
+ */
+async function captureDisplay(display: Electron.Display): Promise<DisplaySnapshot> {
+  const size = {
     width: Math.max(1, Math.round(display.bounds.width * display.scaleFactor)),
     height: Math.max(1, Math.round(display.bounds.height * display.scaleFactor))
   }
-  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize })
+  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size })
   const displayIndex = screen.getAllDisplays().findIndex((item) => item.id === display.id)
   const source = sources.find((item) => item.display_id === String(display.id)) ?? sources[displayIndex]
   if (!source) throw new Error('无法读取当前显示器画面')
   const image = source.thumbnail
   const { width, height } = image.getSize()
   if (!width || !height) throw new Error('当前显示器未返回可用画面')
-  const x = Math.min(width - 1, Math.max(0, Math.floor((point.x - display.bounds.x) / display.bounds.width * width)))
-  const y = Math.min(height - 1, Math.max(0, Math.floor((point.y - display.bounds.y) / display.bounds.height * height)))
-  const bitmap = image.toBitmap()
-  const offset = (y * width + x) * 4
-  // Windows 的 NativeImage 位图是 BGRA；这里显式转换以避免红蓝通道互换。
-  const color = `#${[bitmap[offset + 2], bitmap[offset + 1], bitmap[offset]].map((value) => value.toString(16).padStart(2, '0')).join('').toUpperCase()}`
-  const cropSize = Math.min(17, width, height)
-  const cropX = Math.min(width - cropSize, Math.max(0, x - Math.floor(cropSize / 2)))
-  const cropY = Math.min(height - cropSize, Math.max(0, y - Math.floor(cropSize / 2)))
-  const preview = image.crop({ x: cropX, y: cropY, width: cropSize, height: cropSize }).resize({ width: 153, height: 153, quality: 'best' }).toDataURL()
-  return { color, preview }
+  const bgra = image.toBitmap()
+  const rgba = new Uint8Array(bgra.length)
+  for (let i = 0; i < bgra.length; i += 4) {
+    rgba[i] = bgra[i + 2]
+    rgba[i + 1] = bgra[i + 1]
+    rgba[i + 2] = bgra[i]
+    rgba[i + 3] = bgra[i + 3]
+  }
+  return { image: rgba, width, height }
 }
 
 function createTrendWindow(): BrowserWindow {
@@ -443,12 +450,12 @@ app.whenReady().then(() => {
   let trendWindow: BrowserWindow | undefined
   let toolboxWindow: BrowserWindow | undefined
   let screenColorPicker: ScreenColorPickerSession | undefined
-  let screenColorCapturePending = false
   const finishScreenColorPicker = (result?: { color?: string; error?: Error }): void => {
     const session = screenColorPicker
     if (!session) return
     screenColorPicker = undefined
-    screenColorCapturePending = false
+    // 未领取的快照（如取消时某屏还没抓到）在这里释放，避免整屏像素滞留。
+    session.snapshots.clear()
     for (const overlay of session.overlayWindows) if (!overlay.isDestroyed()) overlay.destroy()
     if (!session.sourceWindow.isDestroyed()) session.sourceWindow.show()
     if (result?.color) session.resolve(result.color)
@@ -463,17 +470,33 @@ app.whenReady().then(() => {
     const displays = screen.getAllDisplays()
     if (!displays.length) { rejectPicker(new Error('未检测到可用显示器')); return }
     sourceWindow.hide()
+    // 每个显示器只抓一帧；覆盖层就绪后各自索取自己那一帧，抓屏与建窗并行。
+    const snapshots = new Map(displays.map((display) => [display.id, captureDisplay(display)]))
     const overlayWindows = displays.map(createScreenColorPickerWindow)
-    screenColorPicker = { sourceWindow, overlayWindows, resolve: resolvePicker, reject: rejectPicker }
-    let readyCount = 0
-    const showWhenReady = (): void => {
-      readyCount += 1
-      if (readyCount === overlayWindows.length && screenColorPicker?.overlayWindows === overlayWindows) overlayWindows.forEach((overlay) => overlay.showInactive())
-    }
-    overlayWindows.forEach((overlay) => overlay.once('ready-to-show', showWhenReady))
+    const session: ScreenColorPickerSession = { sourceWindow, overlayWindows, snapshots, ready: new Set(), resolve: resolvePicker, reject: rejectPicker }
+    screenColorPicker = session
     overlayWindows.forEach((overlay) => overlay.webContents.once('did-fail-load', (_event, code, description) => {
       finishScreenColorPicker({ error: new Error(`取色界面加载失败（${code}）：${description}`) })
     }))
+  })
+  // 覆盖层就绪后索取本显示器快照：主进程回传 RGBA 像素，之后取色与放大全在本地做。
+  ipcMain.handle('screen-color:snapshot', async (event, requestedId: unknown) => {
+    const session = screenColorPicker
+    const displayId = Number(requestedId)
+    if (!session) throw new Error('屏幕取色未启动')
+    // 快照体积大，只交给本会话自己创建的覆盖层。
+    if (!session.overlayWindows.some((overlay) => !overlay.isDestroyed() && overlay.webContents === event.sender)) throw new Error('非法的快照请求')
+    const pending = session.snapshots.get(displayId)
+    if (!pending) throw new Error('未知的显示器')
+    const snapshot = await pending
+    // 像素已交付渲染层，主进程随即释放；同时记录该覆盖层已就绪。
+    session.snapshots.delete(displayId)
+    session.ready.add(displayId)
+    // 覆盖层是透明的：等所有显示器都拿到快照再显示，避免先看到实时画面再突然冻结。
+    if (!session.snapshots.size) {
+      for (const overlay of session.overlayWindows) if (!overlay.isDestroyed()) overlay.showInactive()
+    }
+    return snapshot
   })
   const cleanupTargets = new Map<string, { path: string; rootPath: string; directoryName: string }>()
   // const statusWindow = createStatusWindow()
@@ -540,27 +563,11 @@ app.whenReady().then(() => {
     return startScreenColorPicker(sourceWindow)
   })
   ipcMain.on('screen-color:cancel', () => finishScreenColorPicker())
-  ipcMain.handle('screen-color:preview', async (_event, point: unknown) => {
-    if (!screenColorPicker || !point || typeof point !== 'object') throw new Error('屏幕取色未启动')
-    const { x, y } = point as { x?: unknown; y?: unknown }
-    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) throw new Error('取色坐标无效')
-    return readScreenColor({ x: Math.round(x), y: Math.round(y) })
-  })
-  ipcMain.on('screen-color:choose', async (_event, point: unknown) => {
-    if (!point || typeof point !== 'object') return
-    const { x, y } = point as { x?: unknown; y?: unknown }
-    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return
-    if (!screenColorPicker || screenColorCapturePending) return
-    screenColorCapturePending = true
-    for (const overlay of screenColorPicker.overlayWindows) if (!overlay.isDestroyed()) overlay.destroy()
-    try {
-      // 等待合成器移除准星覆盖层，确保截图不会把取色 UI 本身采进去。
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 80))
-      const { color } = await readScreenColor({ x: Math.round(x), y: Math.round(y) })
-      finishScreenColorPicker({ color })
-    } catch (error) {
-      finishScreenColorPicker({ error: error instanceof Error ? error : new Error(String(error)) })
-    }
+  // 冻结式取色：颜色已由覆盖层从本地快照算出，直接回传即可，无需再抓屏。
+  ipcMain.on('screen-color:choose', (_event, color: unknown) => {
+    if (typeof color !== 'string' || !/^#[0-9A-Fa-f]{6}$/.test(color)) return
+    if (!screenColorPicker) return
+    finishScreenColorPicker({ color: color.toUpperCase() })
   })
   ipcMain.handle('network:get-local-ipv4', () => localIpv4Addresses())
   ipcMain.handle('network:detect-exit-ip', async () => {
