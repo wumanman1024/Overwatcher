@@ -22,6 +22,7 @@ import { clampPosition, selectWorkAreaForPosition, sizeForOverlayMode } from '@l
 import { ensureSingleInstance } from './startup'
 import { installMainErrorLogging } from './runtime-errors'
 import { registerLlmIpc } from './llm-bridge'
+import { registerNginxIpc } from './nginx'
 import { deleteModel, listModels, saveModel, setDefaultModel } from './model-store'
 
 installMainErrorLogging()
@@ -678,6 +679,9 @@ app.whenReady().then(() => {
 
   // 大模型调用统一从主进程出网；地址/密钥由渲染层随请求带入，此处不落盘。
   registerLlmIpc()
+
+  // nginx 进程与配置管理（仅 Windows 生效，各 handler 自行校验平台）。
+  registerNginxIpc()
 
   // 模型配置读写本地 SQLite（userData/localforge.db）。
   ipcMain.handle('model-configs:list', () => listModels())

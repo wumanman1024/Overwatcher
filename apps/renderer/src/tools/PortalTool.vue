@@ -5,7 +5,7 @@ import ToolboxPage from '../ToolboxPage.vue'
 import SvgIcon from '../components/SvgIcon.vue'
 
 type ToolCategory = 'all' | 'file' | 'data' | 'agent' | 'design' | 'network'
-type ToolView = 'cleanup' | 'json' | 'data-lab' | 'time' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image-compress' | 'image-crop' | 'background-remove' | 'screen-color' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'ports' | 'volta' | 'assistant-prompt' | 'menu-sql'
+type ToolView = 'cleanup' | 'json' | 'data-lab' | 'time' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image-compress' | 'image-crop' | 'background-remove' | 'screen-color' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'nginx' | 'ports' | 'volta' | 'assistant-prompt' | 'menu-sql'
 const route = useRoute()
 const router = useRouter()
 const savedCategory = localStorage.getItem('localforge:default-category')
@@ -31,6 +31,7 @@ const portalTools: Array<{ id: ToolView; category: Exclude<ToolCategory, 'all'>;
   { id: 'ports', category: 'network', title: '端口与进程管理', description: '查看本机监听端口，并按需结束关联进程。', state: '网络工具' },
   { id: 'ip-check', category: 'network', title: 'IP 与代理检测', description: '检测当前出口公网 IP，确认代理或 VPN 是否实际生效。', state: '网络工具' },
   { id: 'network-diagnosis', category: 'network', title: '网络诊断', description: 'DNS 解析、TCP 端口及 HTTP/HTTPS 连通性检查。', state: '网络工具' },
+  { id: 'nginx', category: 'network', title: 'nginx 管理', description: '启停与重载 nginx、校验编辑配置、开机自启与目录快捷打开。', state: '网络工具' },
   { id: 'volta', category: 'data', title: 'Volta Node 管理', description: '查看、安装默认 Node 版本，或为项目固定版本。', state: '数据工具' },
   { id: 'assistant-prompt', category: 'data', title: 'AI 提示词与配置', description: '编辑 Codex、Cursor、Claude Code 的全局提示词和配置文件。', state: '数据工具' },
   { id: 'menu-sql', category: 'agent', title: '菜单 SQL 生成器', description: '粘贴中文菜单树，AI 译出英文标识并生成 sys_menu 插入脚本。', state: '智能体' }
@@ -48,7 +49,7 @@ const openTool = (tool: ToolView) => router.push({ name: tool })
   <header class="toolbox-heading"><p>LOCALFORGE / TOOL PORTAL</p><h2>{{ portalTitle }}</h2><span>选择一项工具开始工作；本地工具不上传内容，联网工具会明确说明用途。</span></header>
   <section class="portal-list" :aria-label="`${portalTitle}列表`">
     <button v-for="tool in visiblePortalTools" :key="tool.id" class="portal-item" type="button" @click="openTool(tool.id)">
-      <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'menu-sql' ? 'menu-tree' : tool.id === 'time' ? 'clock' : tool.category === 'data' ? 'code' : tool.id === 'color' || tool.id === 'screen-color' ? 'palette' : tool.category === 'design' ? 'image' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
+      <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'menu-sql' ? 'menu-tree' : tool.id === 'time' ? 'clock' : tool.id === 'nginx' ? 'server' : tool.category === 'data' ? 'code' : tool.id === 'color' || tool.id === 'screen-color' ? 'palette' : tool.category === 'design' ? 'image' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
       <span class="portal-copy"><em>{{ tool.state }}</em><strong>{{ tool.title }}</strong><small>{{ tool.description }}</small></span><b>›</b>
     </button>
     <p v-if="!visiblePortalTools.length" class="portal-empty">该分类暂时没有可用工具。</p>

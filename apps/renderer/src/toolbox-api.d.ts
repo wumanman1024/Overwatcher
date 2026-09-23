@@ -13,6 +13,9 @@ declare global {
   type AssistantPromptTool = 'codex' | 'cursor' | 'claude-code'
   type AssistantConfigFile = 'prompt' | 'config'
   type AssistantConfigResult = { path: string; exists: boolean; content: string }
+  type NginxStatus = { exeConfigured: boolean; exePath?: string; prefix?: string; paths?: { conf: string; logs: string; html: string }; configExists: boolean; running: boolean; processes: Array<{ pid: number; role: 'master' | 'worker' }>; autostart: boolean; autostartCommand?: string }
+  type NginxAction = 'stop' | 'quit' | 'reload' | 'reopen'
+  type NginxOpenTarget = 'prefix' | 'confDir' | 'logs' | 'html' | 'config'
 
   interface Window {
     developerTools: { selectDirectory(): Promise<string | undefined>; scanDirectories(rootPath: string, directoryName: string): Promise<CleanupTarget[]>; deleteDirectories(ids: string[]): Promise<DeleteResult[]>; selectImageOutputDirectory(): Promise<string | undefined>; saveCompressedImages(outputDirectory: string, files: Array<{ name: string; data: ArrayBuffer }>): Promise<{ directory: string; files: string[] }> }
@@ -23,6 +26,7 @@ declare global {
     voltaTools?: { getNodeState(): Promise<VoltaNodeState>; installNode(version: string): Promise<VoltaNodeState>; pinNode(version: string, directory: string): Promise<{ directory: string; version: string }> }
     nodeReleaseTools?: { list(): Promise<NodeRelease[]>; installManager(manager: 'volta'): Promise<VoltaNodeState> }
     assistantConfig?: { read(tool: AssistantPromptTool, file: AssistantConfigFile): Promise<AssistantConfigResult>; save(tool: AssistantPromptTool, file: AssistantConfigFile, content: string): Promise<{ path: string }> }
+    nginxTools?: { status(): Promise<NginxStatus>; browse(): Promise<{ path?: string }>; setPath(path: string): Promise<NginxStatus>; start(): Promise<{ output: string; ok: boolean }>; control(action: NginxAction): Promise<{ output: string; ok: boolean }>; testConfig(): Promise<{ output: string; ok: boolean }>; killAll(): Promise<{ killed: number }>; setAutostart(enabled: boolean): Promise<NginxStatus>; readConfig(): Promise<AssistantConfigResult>; saveConfig(content: string): Promise<{ path: string }>; open(target: NginxOpenTarget): Promise<void> }
     screenColorPicker?: { pick(): Promise<string>; preview(point: { x: number; y: number }): Promise<{ color: string; preview: string }>; choose(point: { x: number; y: number }): void; cancel(): void }
     menuSqlTools?: { saveScript(request: { fileName?: string; content: string }): Promise<{ path: string } | undefined> }
     modelConfigs?: {

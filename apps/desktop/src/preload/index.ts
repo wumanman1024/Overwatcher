@@ -57,6 +57,20 @@ contextBridge.exposeInMainWorld('assistantConfig', {
   save: (tool: string, file: 'prompt' | 'config', content: string) => ipcRenderer.invoke('assistant-config:save', { tool, file, content })
 })
 
+contextBridge.exposeInMainWorld('nginxTools', {
+  status: () => ipcRenderer.invoke('nginx:status'),
+  browse: () => ipcRenderer.invoke('nginx:browse'),
+  setPath: (path: string) => ipcRenderer.invoke('nginx:set-path', { path }),
+  start: () => ipcRenderer.invoke('nginx:start'),
+  control: (action: 'stop' | 'quit' | 'reload' | 'reopen') => ipcRenderer.invoke('nginx:control', { action }),
+  testConfig: () => ipcRenderer.invoke('nginx:test-config'),
+  killAll: () => ipcRenderer.invoke('nginx:kill-all'),
+  setAutostart: (enabled: boolean) => ipcRenderer.invoke('nginx:set-autostart', { enabled }),
+  readConfig: () => ipcRenderer.invoke('nginx:read-config'),
+  saveConfig: (content: string) => ipcRenderer.invoke('nginx:save-config', { content }),
+  open: (target: 'prefix' | 'confDir' | 'logs' | 'html' | 'config') => ipcRenderer.invoke('nginx:open', { target })
+})
+
 contextBridge.exposeInMainWorld('nodeReleaseTools', {
   list: () => ipcRenderer.invoke('node-releases:list'),
   installManager: (manager: 'volta') => ipcRenderer.invoke('version-manager:install', manager)
