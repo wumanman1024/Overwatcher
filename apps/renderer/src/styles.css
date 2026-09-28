@@ -376,6 +376,115 @@ h1, h2, p { margin: 0; }
   transform: rotate(-45deg);
 }
 
+/*
+ * 一键加速的进行中反馈：整个动作要跑两三秒（PowerShell 冷启动是大头），
+ * 没有即时视觉信号会被当成点击无效。结果与失败原因由独立卡片播报，球体这里只管扫光。
+ * 用 inset 阴影而不是叠加伪元素：orb-face 是 isolation: isolate 的圆形，
+ * 加伪元素还得自己裁圆，inset 阴影天然贴着 border-radius。
+ */
+.orb-face.boost-running {
+  animation: orb-boost-sweep 1.1s linear infinite;
+}
+.orb-face.boost-running .orb-liquid { transition-duration: 0.4s; }
+
+@keyframes orb-boost-sweep {
+  0% { box-shadow: inset 0 0 0 2px rgba(6, 173, 86, 0), 0 0 0 0 var(--orb-health-glow); }
+  50% { box-shadow: inset 0 0 0 2px rgba(6, 173, 86, 0.55), 0 0 12px 1px var(--orb-health-glow); }
+  100% { box-shadow: inset 0 0 0 2px rgba(6, 173, 86, 0), 0 0 0 0 var(--orb-health-glow); }
+}
+
+/* 尊重系统的「减少动态效果」：退回静态描边，不再循环闪动。 */
+@media (prefers-reduced-motion: reduce) {
+  .orb-face.boost-running { animation: none; box-shadow: inset 0 0 0 2px rgba(6, 173, 86, 0.5); }
+}
+
+/*
+ * 加速结果卡片：独立透明置顶窗，贴在悬浮球上方。
+ * 窗口本身不设背景，靠卡片自身的圆角与阴影成形；pointer-events 关掉，
+ * 与主进程 setIgnoreMouseEvents 一致，避免卡片挡住下方的点击。
+ */
+.boost-toast {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 9px;
+  height: calc(100% - 8px);
+  margin: 4px 8px 4px 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(6, 173, 86, 0.42);
+  border-radius: 10px;
+  background: rgba(252, 254, 253, 0.94);
+  box-shadow: 0 10px 26px rgba(12, 60, 36, 0.22);
+  backdrop-filter: blur(12px);
+  color: var(--vp-text-1);
+  pointer-events: none;
+  user-select: none;
+}
+
+.boost-toast-mark {
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  border: 2px solid rgba(6, 173, 86, 0.3);
+  border-top-color: var(--orb-brand);
+  border-radius: 50%;
+  animation: boost-toast-spin 0.75s linear infinite;
+}
+
+.boost-toast-copy { display: grid; align-content: center; gap: 2px; min-width: 0; }
+.boost-toast-copy strong { font-size: 13px; font-weight: 800; letter-spacing: .01em; }
+.boost-toast-copy span { overflow: hidden; color: var(--vp-text-2); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.boost-toast-copy small { overflow: hidden; color: var(--vp-text-3); font-size: 9px; font-weight: 600; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 完成：勾形静态标记，不再转动 */
+.boost-toast-done .boost-toast-mark {
+  border: 0;
+  border-radius: 0;
+  animation: none;
+  background: none;
+  position: relative;
+}
+.boost-toast-done .boost-toast-mark::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  width: 6px;
+  height: 11px;
+  border: solid var(--orb-brand);
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg);
+}
+
+/* 失败：整张卡片转成告警配色 */
+.boost-toast-error { border-color: rgba(207, 72, 59, 0.5); }
+.boost-toast-error .boost-toast-mark {
+  border: 0;
+  animation: none;
+  position: relative;
+}
+.boost-toast-error .boost-toast-mark::before,
+.boost-toast-error .boost-toast-mark::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 0;
+  width: 14px;
+  height: 2.5px;
+  border-radius: 2px;
+  background: #cf4839;
+}
+.boost-toast-error .boost-toast-mark::before { transform: rotate(45deg); }
+.boost-toast-error .boost-toast-mark::after { transform: rotate(-45deg); }
+.boost-toast-error .boost-toast-copy strong { color: #b23c32; }
+/* 失败原因往往比正常文案长（例如被策略拦截的整句），允许换行而不是截成半句话。 */
+.boost-toast-error .boost-toast-copy span { white-space: normal; line-height: 1.35; }
+
+@keyframes boost-toast-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .boost-toast-mark { animation: none; border-top-color: var(--orb-brand); }
+}
+
 .metric-swap-enter-active, .metric-swap-leave-active { transition: opacity 0.18s ease; }
 .metric-swap-enter-from, .metric-swap-leave-to { opacity: 0; }
 
@@ -758,6 +867,7 @@ h1, h2, p { margin: 0; }
 }
 
 .portal-icon-color { color: #8b49b5; border-color: #dcc5eb; background: linear-gradient(145deg, #f8effd, #eee0f6); }
+.portal-icon-memory-boost { color: #1f7a8c; border-color: #c3dfe6; background: linear-gradient(145deg, #eef8fa, #e2f1f5); }
 .portal-icon-image { color: #c06720; border-color: #efd2b8; background: linear-gradient(145deg, #fff5e9, #fbead8); }
 .screen-color-picker { position: fixed; inset: 0; overflow: hidden; cursor: none; user-select: none; }.screen-color-picker__view { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }.screen-color-picker__error { position: fixed; top: 40px; left: 50%; padding: 10px 18px; border-radius: 10px; background: rgba(120,20,20,.92); color: #fff; font: 600 13px/1.4 "Segoe UI", sans-serif; transform: translateX(-50%); }.screen-color-picker__cursor { position: fixed; width: 0; height: 0; pointer-events: none; }.screen-color-picker__cursor::before, .screen-color-picker__cursor::after { position: absolute; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.7); content: ''; }.screen-color-picker__cursor::before { top: 0; left: -13px; width: 27px; height: 1px; transform: translateY(-50%); }.screen-color-picker__cursor::after { top: -13px; left: 0; width: 1px; height: 27px; transform: translateX(-50%); }.screen-color-picker__cursor i { position: absolute; top: -4px; left: -4px; width: 7px; height: 7px; border: 1px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.7), inset 0 0 0 1px rgba(0,0,0,.4); background: rgba(255,255,255,.25); }.screen-color-picker__loupe { position: fixed; display: grid; gap: 8px; padding: 8px; border: 1px solid rgba(255,255,255,.4); border-radius: 12px; background: rgba(16,22,20,.92); box-shadow: 0 14px 34px rgba(0,0,0,.4); backdrop-filter: blur(10px); color: #fff; pointer-events: none; }.screen-color-picker__loupe-canvas { display: block; border: 1px solid rgba(255,255,255,.5); border-radius: 6px; background: #111; image-rendering: pixelated; }.screen-color-picker__readout { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; align-items: center; gap: 2px 8px; }.screen-color-picker__swatch { grid-row: 1 / span 2; width: 26px; height: 26px; border: 2px solid rgba(255,255,255,.85); border-radius: 7px; box-shadow: 0 1px 4px rgba(0,0,0,.45); }.screen-color-picker__readout strong { color: #fff; font: 800 15px/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .04em; }.screen-color-picker__readout em { color: #9db8a9; font: 600 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; font-style: normal; }.screen-color-picker__hint { position: fixed; bottom: 26px; left: 50%; padding: 8px 16px; border-radius: 999px; background: rgba(16,22,20,.86); box-shadow: 0 8px 22px rgba(0,0,0,.3); backdrop-filter: blur(8px); color: #e7efe9; font: 600 12px/1.3 "Segoe UI", sans-serif; letter-spacing: .02em; pointer-events: none; transform: translateX(-50%); }
 .color-card { display: grid; grid-template-columns: 76px minmax(180px, 1fr) 48px; gap: 14px; align-items: center; max-width: 680px; padding: 20px; border: 1px solid #dfe5e2; border-radius: 6px; background: #fff; box-shadow: 0 6px 18px rgba(24, 67, 47, .06); }.color-preview { width: 76px; height: 76px; border: 1px solid rgba(0, 0, 0, .08); border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.25); }.color-card label { display: grid; gap: 7px; color: #526158; font-size: 12px; font-weight: 750; }.color-card label input { padding: 10px; font: 16px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .05em; }.color-picker { width: 48px; height: 40px; padding: 3px; border: 1px solid #d8dfdb; border-radius: 4px; background: #fff; cursor: pointer; }.color-card .tool-message { grid-column: 1 / -1; margin: 0; }.color-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }.color-values button { display: grid; gap: 6px; min-width: 0; padding: 16px; border: 1px solid #dfe5e2; border-radius: 6px; background: #fff; text-align: left; box-shadow: 0 5px 14px rgba(24, 67, 47, .04); }.color-values small, .image-details small { color: #809087; font-size: 10px; font-weight: 800; letter-spacing: .08em; }.color-values strong { overflow: hidden; color: #25312a; font: 700 13px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }.color-values span { color: #87948d; font-size: 11px; }

@@ -1,5 +1,5 @@
 import Store from 'electron-store'
-import type { Position } from './overlay-state'
+import type { Position } from '@localforge/shared/overlay-state'
 
 export interface OverlayPreferences {
   position?: Position

@@ -14,6 +14,9 @@ const orbMetrics = [
   { label: 'RAM', key: 'memory' },
   { label: 'GPU', key: 'gpu' }
 ] as const
+const memoryMetricIndex = orbMetrics.findIndex((metric) => metric.key === 'memory')
+// 结果由主进程弹出的独立卡片播报，球体这里只保留「进行中」的扫光反馈。
+const isBoosting = ref(false)
 let unsubscribe: (() => void) | undefined
 const isPanelSurface = new URLSearchParams(location.search).get('surface') === 'panel'
 const isToolboxSurface = new URLSearchParams(location.search).get('surface') === 'toolbox'
@@ -38,7 +41,10 @@ onMounted(async () => {
     reportRendererError('首次读取监控数据失败，等待下一次更新', error)
   }
   rotationInterval = setInterval(() => {
-    if (!isRotationPaused.value && !isMetricPinned.value && !isExpanded.value) activeMetricIndex.value = (activeMetricIndex.value + 1) % orbMetrics.length
+    // 加速期间冻结轮播：读数中途从 RAM 跳走会让人以为加速没生效。
+    if (!isRotationPaused.value && !isMetricPinned.value && !isExpanded.value && !isBoosting.value) {
+      activeMetricIndex.value = (activeMetricIndex.value + 1) % orbMetrics.length
+    }
   }, 2500)
   if (isPanelSurface) isWindowMaximized.value = await window.windowControls.isMaximized()
 })
@@ -48,16 +54,37 @@ onUnmounted(() => {
   unsubscribe?.()
   if (rotationInterval) clearInterval(rotationInterval)
 })
-const startDrag = (event: PointerEvent) => { if (isPanelSurface && !(event.target as HTMLElement).closest('.panel-header')) return; drag = { x: event.screenX, y: event.screenY, screenX: window.screenX, screenY: window.screenY }; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId) }
+const startDrag = (event: PointerEvent) => {
+  // 右键要留给「打开监控中心」，不能进入拖拽；否则 pointerup 会把它当成一次点击。
+  if (event.button !== 0) return
+  if (isPanelSurface && !(event.target as HTMLElement).closest('.panel-header')) return
+  drag = { x: event.screenX, y: event.screenY, screenX: window.screenX, screenY: window.screenY }
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+}
 const moveDrag = (event: PointerEvent) => { if (!drag) return; const position = { x: drag.screenX + event.screenX - drag.x, y: drag.screenY + event.screenY - drag.y }; if (isPanelSurface) window.hardwareMonitor.movePanel(position); else window.hardwareMonitor.moveOverlay(position) }
 const stopDrag = (event: PointerEvent) => {
   if (!drag) return
   const started = drag
   drag = undefined
-  if (shouldOpenPanelOnPointerUp({ x: started.x, y: started.y }, { x: event.screenX, y: event.screenY })) window.hardwareMonitor.openPanel()
+  if (shouldOpenPanelOnPointerUp({ x: started.x, y: started.y }, { x: event.screenX, y: event.screenY })) void boostMemory()
 }
 const cancelDrag = () => { drag = undefined }
 const openPanel = () => { if (!isPanelSurface) window.hardwareMonitor.openPanel() }
+const boostMemory = async () => {
+  if (isPanelSurface || isToolboxSurface || isBoosting.value) return
+  // 锁到 RAM 指标：回落是内存水波下降，读数若正轮播在 CPU/GPU 上用户看不见效果。
+  activeMetricIndex.value = memoryMetricIndex
+  isBoosting.value = true
+  // 结果与失败原因都由主进程弹卡片播报（托盘、工具页走同一条路径），这里只负责收尾动画。
+  // 不在这里判平台：不支持时让主进程统一报错，卡片才有内容可显示。
+  try {
+    await window.memoryBooster?.boost()
+  } catch (error) {
+    reportRendererError('内存整理失败', error)
+  } finally {
+    isBoosting.value = false
+  }
+}
 const closePanel = () => window.hardwareMonitor.closePanel()
 const minimizeWindow = () => window.windowControls.minimize()
 const toggleMaximizeWindow = async () => {
@@ -96,8 +123,9 @@ const togglePin = () => { isMetricPinned.value = !isMetricPinned.value }
     :class="{ expanded: isExpanded, 'orb-window': !isPanelSurface }"
     :aria-expanded="isExpanded"
     tabindex="0"
-    @keydown.enter.prevent="openPanel"
-    @keydown.space.prevent="openPanel"
+    @keydown.enter.prevent="boostMemory"
+    @keydown.space.prevent="boostMemory"
+    @contextmenu.prevent="openPanel"
     @pointerenter="pauseRotation"
     @pointerleave="handlePointerLeave"
     @pointerdown="startDrag"
@@ -105,7 +133,7 @@ const togglePin = () => { isMetricPinned.value = !isMetricPinned.value }
     @pointerup="stopDrag"
     @pointercancel="cancelDrag"
   >
-    <div v-if="snapshot && !isPanelSurface" class="orb-face" :class="`status-${activeMetricHealth}`">
+    <div v-if="snapshot && !isPanelSurface" class="orb-face" :class="[`status-${activeMetricHealth}`, isBoosting ? 'boost-running' : '']">
       <div class="orb-core">
         <div class="orb-liquid" :style="{ height: `${activeFill}%` }" aria-hidden="true"><i></i><i></i></div>
         <Transition name="metric-swap">

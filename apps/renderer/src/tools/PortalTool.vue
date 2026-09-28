@@ -5,7 +5,7 @@ import ToolboxPage from '../ToolboxPage.vue'
 import SvgIcon from '../components/SvgIcon.vue'
 
 type ToolCategory = 'all' | 'file' | 'data' | 'agent' | 'design' | 'network'
-type ToolView = 'cleanup' | 'json' | 'data-lab' | 'time' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image-compress' | 'image-crop' | 'background-remove' | 'screen-color' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'nginx' | 'frpc' | 'ports' | 'volta' | 'assistant-prompt' | 'menu-sql'
+type ToolView = 'cleanup' | 'memory-boost' | 'json' | 'data-lab' | 'time' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image-compress' | 'image-crop' | 'background-remove' | 'screen-color' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'nginx' | 'frpc' | 'ports' | 'volta' | 'assistant-prompt' | 'menu-sql'
 const route = useRoute()
 const router = useRouter()
 const savedCategory = localStorage.getItem('localforge:default-category')
@@ -13,6 +13,7 @@ const initialCategory: ToolCategory = savedCategory === 'file' || savedCategory 
 const categories: Array<{ id: ToolCategory; label: string }> = [{ id: 'all', label: '全部工具' }, { id: 'file', label: '文件工具' }, { id: 'data', label: '数据工具' }, { id: 'agent', label: '智能体' }, { id: 'design', label: '设计工具' }, { id: 'network', label: '网络工具' }]
 const portalTools: Array<{ id: ToolView; category: Exclude<ToolCategory, 'all'>; title: string; description: string; state: string }> = [
   { id: 'cleanup', category: 'file', title: '批量清理目录', description: '递归扫描并清理 node_modules 或指定名称的目录。', state: '文件工具' },
+  { id: 'memory-boost', category: 'file', title: '内存加速', description: '整理各进程的内存占用，立即抬高可用内存。', state: '文件工具' },
   { id: 'json', category: 'data', title: 'JSON 格式化', description: '格式化、压缩、键排序与本地校验。', state: '数据工具' },
   { id: 'data-lab', category: 'data', title: '开发数据转换台', description: 'Base64、URL、时间戳与 JWT 的本地转换和解析。', state: '数据工具' },
   { id: 'time', category: 'data', title: '时间工作台', description: '时间戳与日期互转、时间差计算、日期加减偏移。', state: '数据工具' },
@@ -50,7 +51,7 @@ const openTool = (tool: ToolView) => router.push({ name: tool })
   <header class="toolbox-heading"><p>LOCALFORGE / TOOL PORTAL</p><h2>{{ portalTitle }}</h2><span>选择一项工具开始工作；本地工具不上传内容，联网工具会明确说明用途。</span></header>
   <section class="portal-list" :aria-label="`${portalTitle}列表`">
     <button v-for="tool in visiblePortalTools" :key="tool.id" class="portal-item" type="button" @click="openTool(tool.id)">
-      <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'menu-sql' ? 'menu-tree' : tool.id === 'time' ? 'clock' : tool.id === 'nginx' ? 'server' : tool.category === 'data' ? 'code' : tool.id === 'color' || tool.id === 'screen-color' ? 'palette' : tool.category === 'design' ? 'image' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
+      <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'memory-boost' ? 'hardware-memory' : tool.id === 'menu-sql' ? 'menu-tree' : tool.id === 'time' ? 'clock' : tool.id === 'nginx' ? 'server' : tool.category === 'data' ? 'code' : tool.id === 'color' || tool.id === 'screen-color' ? 'palette' : tool.category === 'design' ? 'image' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
       <span class="portal-copy"><em>{{ tool.state }}</em><strong>{{ tool.title }}</strong><small>{{ tool.description }}</small></span><b>›</b>
     </button>
     <p v-if="!visiblePortalTools.length" class="portal-empty">该分类暂时没有可用工具。</p>

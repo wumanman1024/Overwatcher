@@ -22,6 +22,8 @@ declare global {
   type FrpcTunnel = { name: string; type: string; status: string; trafficIn: number; trafficOut: number; todayTraffic: number }
   type FrpcTunnelsResult = { available: boolean; reason?: string; tunnels: FrpcTunnel[] }
   type FrpcOpenTarget = 'exeDir' | 'configDir' | 'config'
+  // freedBytes 是系统可用内存的净增（与悬浮球水波同源），不是各进程工作集差值之和。
+  type MemoryBoostResult = { freedBytes: number; beforeAvailable: number; afterAvailable: number; beforeUsage: number; afterUsage: number; totalBytes: number; trimmed: number; skipped: number; top: Array<{ name: string; pid: number; workingSet: number }> }
 
   interface Window {
     developerTools: { selectDirectory(): Promise<string | undefined>; scanDirectories(rootPath: string, directoryName: string): Promise<CleanupTarget[]>; deleteDirectories(ids: string[]): Promise<DeleteResult[]>; selectImageOutputDirectory(): Promise<string | undefined>; saveCompressedImages(outputDirectory: string, files: Array<{ name: string; data: ArrayBuffer }>): Promise<{ directory: string; files: string[] }> }
@@ -29,6 +31,8 @@ declare global {
     windowControls: { minimize(): void; toggleMaximize(): void; close(): void; isMaximized(): Promise<boolean> }
     networkTools?: { getLocalIpv4(): Promise<{ lan: LocalIpv4[]; wired: LocalIpv4[] }>; detectExitIp(): Promise<ExitIpResult>; diagnose(host: string, port: number, mode: 'tcp' | 'http' | 'https'): Promise<NetworkDiagnosis> }
     processTools?: { listListening(): Promise<ListeningProcess[]>; terminate(pid: number): Promise<{ pid: number }> }
+    memoryBooster?: { boost(): Promise<MemoryBoostResult>; platform: string }
+    boostToast?: { subscribe(callback: (status: { phase: 'running' | 'done' | 'error'; freedBytes?: number; trimmed?: number; skipped?: number; message?: string }) => void): () => void }
     voltaTools?: { getNodeState(): Promise<VoltaNodeState>; installNode(version: string): Promise<VoltaNodeState>; pinNode(version: string, directory: string): Promise<{ directory: string; version: string }> }
     nodeReleaseTools?: { list(): Promise<NodeRelease[]>; installManager(manager: 'volta'): Promise<VoltaNodeState> }
     assistantConfig?: { read(tool: AssistantPromptTool, file: AssistantConfigFile): Promise<AssistantConfigResult>; save(tool: AssistantPromptTool, file: AssistantConfigFile, content: string): Promise<{ path: string }> }

@@ -46,6 +46,21 @@ contextBridge.exposeInMainWorld('processTools', {
   terminate: (pid: number) => ipcRenderer.invoke('process:terminate', pid)
 })
 
+// platform 一并暴露：非 Windows 下悬浮球据此禁用加速，而不是等点击后收到 reject。
+contextBridge.exposeInMainWorld('memoryBooster', {
+  boost: () => ipcRenderer.invoke('memory:boost'),
+  platform: process.platform
+})
+
+// 结果卡片是独立置顶窗，只接收主进程推送的加速状态，不反向调用。
+contextBridge.exposeInMainWorld('boostToast', {
+  subscribe: (callback: (status: unknown) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, status: unknown) => callback(status)
+    ipcRenderer.on('boost-toast:status', listener)
+    return () => ipcRenderer.removeListener('boost-toast:status', listener)
+  }
+})
+
 contextBridge.exposeInMainWorld('voltaTools', {
   getNodeState: () => ipcRenderer.invoke('volta:get-node-state'),
   installNode: (version: string) => ipcRenderer.invoke('volta:install-node', version),

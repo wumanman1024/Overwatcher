@@ -1,6 +1,7 @@
 import { createMemoryHistory, createRouter } from 'vue-router'
 import PortalTool from './tools/PortalTool.vue'
 import CleanupTool from './tools/CleanupTool.vue'
+import MemoryBoostTool from './tools/MemoryBoostTool.vue'
 import JsonTool from './tools/JsonTool.vue'
 import DataLabTool from './tools/DataLabTool.vue'
 import TimeTool from './tools/TimeTool.vue'
@@ -30,6 +31,7 @@ export const router = createRouter({
   routes: [
     { path: '/', name: 'portal', component: PortalTool },
     { path: '/cleanup', name: 'cleanup', component: CleanupTool },
+    { path: '/memory-boost', name: 'memory-boost', component: MemoryBoostTool },
     { path: '/json', name: 'json', component: JsonTool },
     { path: '/data-lab', name: 'data-lab', component: DataLabTool },
     { path: '/time', name: 'time', component: TimeTool },

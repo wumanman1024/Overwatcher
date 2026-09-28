@@ -3,12 +3,18 @@ import App from './App.vue'
 import StatusBar from './StatusBar.vue'
 import TrendPage from './TrendPage.vue'
 import ScreenColorPicker from './ScreenColorPicker.vue'
+import BoostToast from './BoostToast.vue'
 import { router } from './router'
 import 'element-plus/dist/index.css'
 import 'virtual:svg-icons-register'
 import './styles.css'
 
 const surface = new URLSearchParams(location.search).get('surface')
-const vueApp = createApp(surface === 'status' ? StatusBar : surface === 'trend' ? TrendPage : surface === 'screen-color-picker' ? ScreenColorPicker : App)
+const rootComponent = surface === 'status' ? StatusBar
+  : surface === 'trend' ? TrendPage
+  : surface === 'screen-color-picker' ? ScreenColorPicker
+  : surface === 'boost-toast' ? BoostToast
+  : App
+const vueApp = createApp(rootComponent)
 if (surface === 'toolbox') vueApp.use(router)
 vueApp.mount('#app')

@@ -24,6 +24,8 @@ import { installMainErrorLogging } from './runtime-errors'
 import { registerLlmIpc } from './llm-bridge'
 import { registerNginxIpc } from './nginx'
 import { registerFrpcIpc } from './frpc'
+import { boostMemory, registerMemoryBoosterIpc } from './memory-booster'
+import { showBoostStatus } from './boost-toast'
 import { deleteModel, listModels, saveModel, setDefaultModel } from './model-store'
 
 installMainErrorLogging()
@@ -849,6 +851,8 @@ app.whenReady().then(() => {
       { label: '打开监控中心', click: openPanel },
       { label: '打开趋势分析', click: openTrend },
       { type: 'separator' },
+      { label: '一键加速内存', click: () => { void runMemoryBoost() } },
+      { type: 'separator' },
       { label: window.isVisible() ? '隐藏悬浮窗' : '显示悬浮窗', click: () => { window.isVisible() ? window.hide() : window.show(); updateTray() } },
       { type: 'separator' },
       { label: '退出', click: () => app.quit() }
@@ -856,9 +860,10 @@ app.whenReady().then(() => {
   }
   tray.on('click', openToolbox)
   tray.on('double-click', openToolbox)
-  updateTray()
   const sampler = new MetricSampler([collectBaseMetrics, collectGpuMetricsWithBackoff, collectLinuxTemperature, collectPlatformTelemetry])
-  const publish = async (): Promise<void> => {
+  // 采集一次并推给悬浮球、监控中心与趋势窗；与循环调度分开，是为了让内存整理完能立刻补推一次，
+  // 否则球上的水波最多还要再等一秒才落下来。
+  const publishSnapshot = async (): Promise<void> => {
     const metrics = await sampler.collectOnce()
     const displaySection = hardwareProfile?.sections.find((section) => section.key === 'display')
     const mainDisplay = displaySection?.groups?.find((group) => group.status === '主屏') ?? displaySection?.groups?.[0]
@@ -873,8 +878,30 @@ app.whenReady().then(() => {
     panelWindow?.webContents.send('monitor:snapshot', snapshot)
     trendWindow?.webContents.send('monitor:snapshot', snapshot)
     // statusWindow.webContents.send('monitor:status', formatStatusText(snapshot))
+  }
+  const publish = async (): Promise<void> => {
+    await publishSnapshot()
     setTimeout(publish, 1000)
   }
+  // 悬浮球、托盘与工具箱「内存加速」页共用这一条路径，播报也只在这里做一次。
+  // 去重交给 boostMemory 的 in-flight 锁：并发调用会复用同一次执行并各自拿到结果，
+  // 这里若自行拦成 return undefined，工具页就会拿到一个空结果。
+  const runMemoryBoost = async (): Promise<unknown> => {
+    showBoostStatus({ phase: 'running' }, window)
+    try {
+      const result = await boostMemory()
+      showBoostStatus({ phase: 'done', freedBytes: result.freedBytes, trimmed: result.trimmed, skipped: result.skipped }, window)
+      return result
+    } catch (error) {
+      showBoostStatus({ phase: 'error', message: error instanceof Error ? error.message : String(error) }, window)
+      throw error
+    } finally {
+      // 成功与失败都要补推：失败时也要让球从「加速中」的水波动画里出来。
+      await publishSnapshot().catch(() => undefined)
+    }
+  }
+  registerMemoryBoosterIpc(runMemoryBoost)
+  updateTray()
   void publish()
   openToolbox()
   app.on('activate', () => {
