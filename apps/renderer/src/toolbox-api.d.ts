@@ -24,10 +24,12 @@ declare global {
   type FrpcOpenTarget = 'exeDir' | 'configDir' | 'config'
   // freedBytes 是系统可用内存的净增（与悬浮球水波同源），不是各进程工作集差值之和。
   type MemoryBoostResult = { freedBytes: number; beforeAvailable: number; afterAvailable: number; beforeUsage: number; afterUsage: number; totalBytes: number; trimmed: number; skipped: number; top: Array<{ name: string; pid: number; workingSet: number }> }
+  type ManagedProcessRow = { pid: number; name: string; memoryPercent: number; memoryBytes: number; cpuPercent: number; started?: string; command?: string }
 
   interface Window {
     developerTools: { selectDirectory(): Promise<string | undefined>; scanDirectories(rootPath: string, directoryName: string): Promise<CleanupTarget[]>; deleteDirectories(ids: string[]): Promise<DeleteResult[]>; selectImageOutputDirectory(): Promise<string | undefined>; saveCompressedImages(outputDirectory: string, files: Array<{ name: string; data: ArrayBuffer }>): Promise<{ directory: string; files: string[] }> }
-    hardwareMonitor: { getSnapshot(): Promise<MetricSnapshot | undefined>; getHistory(): Promise<MetricSnapshot[]>; subscribe(callback: (snapshot: MetricSnapshot) => void): () => void; moveOverlay(position: { x: number; y: number }): void; movePanel(position: { x: number; y: number }): void; moveTrend(position: { x: number; y: number }): void; openPanel(): void; closePanel(): void; openTrend(): void; closeTrend(): void; subscribeStatus(callback: (text: string) => void): () => void }
+    hardwareMonitor: { getSnapshot(): Promise<MetricSnapshot | undefined>; getHistory(): Promise<MetricSnapshot[]>; subscribe(callback: (snapshot: MetricSnapshot) => void): () => void; moveOverlay(position: { x: number; y: number }): void; movePanel(position: { x: number; y: number }): void; moveTrend(position: { x: number; y: number }): void; openPanel(view?: 'overview' | 'processes'): void; subscribePanelView?(callback: (view: string) => void): () => void; closePanel(): void; openTrend(): void; closeTrend(): void; subscribeStatus(callback: (text: string) => void): () => void }
+    processPanel?: { list(): Promise<ManagedProcessRow[]>; terminate(pids: number[]): Promise<Array<{ pid: number; ok: boolean; error?: string }>> }
     windowControls: { minimize(): void; toggleMaximize(): void; close(): void; isMaximized(): Promise<boolean> }
     networkTools?: { getLocalIpv4(): Promise<{ lan: LocalIpv4[]; wired: LocalIpv4[] }>; detectExitIp(): Promise<ExitIpResult>; diagnose(host: string, port: number, mode: 'tcp' | 'http' | 'https'): Promise<NetworkDiagnosis> }
     processTools?: { listListening(): Promise<ListeningProcess[]>; terminate(pid: number): Promise<{ pid: number }> }

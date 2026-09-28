@@ -26,6 +26,7 @@ import { registerNginxIpc } from './nginx'
 import { registerFrpcIpc } from './frpc'
 import { boostMemory, registerMemoryBoosterIpc } from './memory-booster'
 import { showBoostStatus } from './boost-toast'
+import { registerProcessPanelIpc } from './process-panel'
 import { deleteModel, listModels, saveModel, setDefaultModel } from './model-store'
 
 installMainErrorLogging()
@@ -353,6 +354,37 @@ function createToolboxWindow(): BrowserWindow {
   return window
 }
 
+/*
+ * 独立加速工具窗：悬浮球双击弹出，含内存加速与进程管理两块。
+ * 它是可交互的（勾选框、按钮、结束进程确认），所以必须 focusable，
+ * 且用不透明背景 —— 透明窗上的表单控件在部分显卡驱动下会有残影。
+ */
+function createBoostToolWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    width: 760,
+    height: 620,
+    minWidth: 620,
+    minHeight: 460,
+    show: false,
+    title: '内存加速',
+    icon: applicationIconPath(),
+    backgroundColor: '#f5f6f7',
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  })
+  window.once('ready-to-show', () => window.show())
+  keepOffTaskbar(window)
+  if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?surface=boost-tool`)
+  else void window.loadFile(join(__dirname, '../renderer/index.html'), { query: { surface: 'boost-tool' } })
+  return window
+}
+
 function createScreenColorPickerWindow(display: Electron.Display): BrowserWindow {
   const { x, y, width, height } = display.bounds
   const window = new BrowserWindow({
@@ -545,7 +577,30 @@ app.whenReady().then(() => {
     toolboxWindow = createToolboxWindow()
     toolboxWindow.on('closed', () => { toolboxWindow = undefined })
   }
-  ipcMain.on('monitor:open-panel', openPanel)
+  // 加速工具窗贴在悬浮球旁边弹出：结果与触发它的那颗球要在视觉上成对。
+  // 球可能被拖到屏幕边缘，这里用工作区夹取，避免整窗跑到屏幕外。
+  const openBoostTool = (): void => {
+    if (boostToolWindow && !boostToolWindow.isDestroyed()) {
+      boostToolWindow.show()
+      boostToolWindow.focus()
+      return
+    }
+    boostToolWindow = createBoostToolWindow()
+    boostToolWindow.once('ready-to-show', () => {
+      if (!boostToolWindow || boostToolWindow.isDestroyed()) return
+      const orbBounds = window.getBounds()
+      const workArea = screen.getDisplayNearestPoint({ x: orbBounds.x, y: orbBounds.y }).workArea
+      const bounds = boostToolWindow.getBounds()
+      // 默认放在球的左侧；左侧放不下（球贴左边缘）时翻到右侧。
+      let x = orbBounds.x - bounds.width - 12
+      if (x < workArea.x) x = Math.min(orbBounds.x + orbBounds.width + 12, workArea.x + workArea.width - bounds.width)
+      const y = Math.min(Math.max(orbBounds.y - 40, workArea.y), workArea.y + workArea.height - bounds.height)
+      boostToolWindow.setPosition(Math.round(x), Math.round(y))
+    })
+    boostToolWindow.on('closed', () => { boostToolWindow = undefined })
+  }
+  ipcMain.on('monitor:open-panel', () => openPanel())
+  ipcMain.on('monitor:open-boost-tool', () => openBoostTool())
   ipcMain.on('monitor:close-panel', (event) => BrowserWindow.fromWebContents(event.sender)?.close())
   ipcMain.on('monitor:open-trend', openTrend)
   ipcMain.on('monitor:close-trend', (event) => BrowserWindow.fromWebContents(event.sender)?.close())
@@ -848,7 +903,7 @@ app.whenReady().then(() => {
   const updateTray = (): void => {
     tray?.setContextMenu(Menu.buildFromTemplate([
       { label: '打开 LocalForge', click: openToolbox },
-      { label: '打开监控中心', click: openPanel },
+      { label: '打开监控中心', click: () => openPanel() },
       { label: '打开趋势分析', click: openTrend },
       { type: 'separator' },
       { label: '一键加速内存', click: () => { void runMemoryBoost() } },
@@ -901,6 +956,7 @@ app.whenReady().then(() => {
     }
   }
   registerMemoryBoosterIpc(runMemoryBoost)
+  registerProcessPanelIpc()
   updateTray()
   void publish()
   openToolbox()

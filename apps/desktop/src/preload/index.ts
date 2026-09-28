@@ -16,7 +16,12 @@ contextBridge.exposeInMainWorld('hardwareMonitor', {
   moveOverlay: (position: { x: number; y: number }) => ipcRenderer.send('monitor:move-overlay', position),
   movePanel: (position: { x: number; y: number }) => ipcRenderer.send('monitor:move-panel', position),
   moveTrend: (position: { x: number; y: number }) => ipcRenderer.send('monitor:move-trend', position),
-  openPanel: () => ipcRenderer.send('monitor:open-panel'),
+  openPanel: (view?: 'overview' | 'processes') => ipcRenderer.send('monitor:open-panel', view),
+  subscribePanelView: (callback: (view: string) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, view: string) => callback(view)
+    ipcRenderer.on('panel:view', listener)
+    return () => ipcRenderer.removeListener('panel:view', listener)
+  },
   closePanel: () => ipcRenderer.send('monitor:close-panel'),
   openTrend: () => ipcRenderer.send('monitor:open-trend'),
   closeTrend: () => ipcRenderer.send('monitor:close-trend'),
@@ -50,6 +55,12 @@ contextBridge.exposeInMainWorld('processTools', {
 contextBridge.exposeInMainWorld('memoryBooster', {
   boost: () => ipcRenderer.invoke('memory:boost'),
   platform: process.platform
+})
+
+// 监控中心「进程」页：列全部可管理进程，并按勾选批量结束。
+contextBridge.exposeInMainWorld('processPanel', {
+  list: () => ipcRenderer.invoke('process:list-managed'),
+  terminate: (pids: number[]) => ipcRenderer.invoke('process:terminate-many', pids)
 })
 
 // 结果卡片是独立置顶窗，只接收主进程推送的加速状态，不反向调用。

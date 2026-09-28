@@ -15,8 +15,6 @@ const orbMetrics = [
   { label: 'GPU', key: 'gpu' }
 ] as const
 const memoryMetricIndex = orbMetrics.findIndex((metric) => metric.key === 'memory')
-// 结果由主进程弹出的独立卡片播报，球体这里只保留「进行中」的扫光反馈。
-const isBoosting = ref(false)
 let unsubscribe: (() => void) | undefined
 const isPanelSurface = new URLSearchParams(location.search).get('surface') === 'panel'
 const isToolboxSurface = new URLSearchParams(location.search).get('surface') === 'toolbox'
@@ -42,7 +40,7 @@ onMounted(async () => {
   }
   rotationInterval = setInterval(() => {
     // 加速期间冻结轮播：读数中途从 RAM 跳走会让人以为加速没生效。
-    if (!isRotationPaused.value && !isMetricPinned.value && !isExpanded.value && !isBoosting.value) {
+    if (!isRotationPaused.value && !isMetricPinned.value && !isExpanded.value) {
       activeMetricIndex.value = (activeMetricIndex.value + 1) % orbMetrics.length
     }
   }, 2500)
@@ -52,6 +50,7 @@ onUnmounted(() => {
   window.removeEventListener('error', handleWindowError)
   window.removeEventListener('unhandledrejection', handleUnhandledRejection)
   unsubscribe?.()
+  if (pendingSingleTap) clearTimeout(pendingSingleTap)
   if (rotationInterval) clearInterval(rotationInterval)
 })
 const startDrag = (event: PointerEvent) => {
@@ -66,24 +65,31 @@ const stopDrag = (event: PointerEvent) => {
   if (!drag) return
   const started = drag
   drag = undefined
-  if (shouldOpenPanelOnPointerUp({ x: started.x, y: started.y }, { x: event.screenX, y: event.screenY })) void boostMemory()
+  if (shouldOpenPanelOnPointerUp({ x: started.x, y: started.y }, { x: event.screenX, y: event.screenY })) handleOrbTap()
 }
 const cancelDrag = () => { drag = undefined }
 const openPanel = () => { if (!isPanelSurface) window.hardwareMonitor.openPanel() }
-const boostMemory = async () => {
-  if (isPanelSurface || isToolboxSurface || isBoosting.value) return
-  // 锁到 RAM 指标：回落是内存水波下降，读数若正轮播在 CPU/GPU 上用户看不见效果。
-  activeMetricIndex.value = memoryMetricIndex
-  isBoosting.value = true
-  // 结果与失败原因都由主进程弹卡片播报（托盘、工具页走同一条路径），这里只负责收尾动画。
-  // 不在这里判平台：不支持时让主进程统一报错，卡片才有内容可显示。
-  try {
-    await window.memoryBooster?.boost()
-  } catch (error) {
-    reportRendererError('内存整理失败', error)
-  } finally {
-    isBoosting.value = false
+const openBoostTool = () => { if (!isPanelSurface) window.hardwareMonitor.openBoostTool() }
+
+/*
+ * 单击打开监控中心、双击打开加速工具窗。双击必然先送来一次 pointerup，
+ * 若单击立即生效就会先闪一下监控中心再弹加速窗，所以单击延后一拍：
+ * 这段等待窗口内若来第二次点击，判定为双击并接管手势，单击则被取消。
+ * 加速动作本身放在工具窗里的按钮上，球上任何点击都不会直接改动内存。
+ */
+const DOUBLE_TAP_WINDOW_MS = 260
+let pendingSingleTap: ReturnType<typeof setTimeout> | undefined
+const handleOrbTap = () => {
+  if (pendingSingleTap) {
+    clearTimeout(pendingSingleTap)
+    pendingSingleTap = undefined
+    window.hardwareMonitor.openBoostTool()
+    return
   }
+  pendingSingleTap = setTimeout(() => {
+    pendingSingleTap = undefined
+    openPanel()
+  }, DOUBLE_TAP_WINDOW_MS)
 }
 const closePanel = () => window.hardwareMonitor.closePanel()
 const minimizeWindow = () => window.windowControls.minimize()
@@ -123,8 +129,8 @@ const togglePin = () => { isMetricPinned.value = !isMetricPinned.value }
     :class="{ expanded: isExpanded, 'orb-window': !isPanelSurface }"
     :aria-expanded="isExpanded"
     tabindex="0"
-    @keydown.enter.prevent="boostMemory"
-    @keydown.space.prevent="boostMemory"
+    @keydown.enter.prevent="openBoostTool"
+    @keydown.space.prevent="openBoostTool"
     @contextmenu.prevent="openPanel"
     @pointerenter="pauseRotation"
     @pointerleave="handlePointerLeave"
@@ -133,7 +139,7 @@ const togglePin = () => { isMetricPinned.value = !isMetricPinned.value }
     @pointerup="stopDrag"
     @pointercancel="cancelDrag"
   >
-    <div v-if="snapshot && !isPanelSurface" class="orb-face" :class="[`status-${activeMetricHealth}`, isBoosting ? 'boost-running' : '']">
+    <div v-if="snapshot && !isPanelSurface" class="orb-face" :class="`status-${activeMetricHealth}`">
       <div class="orb-core">
         <div class="orb-liquid" :style="{ height: `${activeFill}%` }" aria-hidden="true"><i></i><i></i></div>
         <Transition name="metric-swap">
