@@ -29,10 +29,9 @@ const cpuTemperatureCache = createCache(() => si.cpuTemperature().catch(() => ({
 const diskIoCache = createCache(() => si.disksIO().catch(() => null), { ttlMs: 3_000 })
 
 export async function collectBaseMetrics(): Promise<CollectorResult> {
-  const [load, memory, network, disks, filesystems, cpu, temperature, diskDevices] = await Promise.all([
-    si.currentLoad(), si.mem(), si.networkStats(), diskIoCache(), filesystemsCache(), cpuInfoCache(), cpuTemperatureCache(), diskLayoutCache()
+  const [load, memory, disks, filesystems, cpu, temperature, diskDevices] = await Promise.all([
+    si.currentLoad(), si.mem(), diskIoCache(), filesystemsCache(), cpuInfoCache(), cpuTemperatureCache(), diskLayoutCache()
   ])
-  const net = network[0]
   const diskIoRates = getDiskIoRates(disks)
   const diskSize = filesystems.reduce((total, filesystem) => total + filesystem.size, 0)
   const diskUsed = filesystems.reduce((total, filesystem) => total + filesystem.used, 0)
@@ -64,12 +63,6 @@ export async function collectBaseMetrics(): Promise<CollectorResult> {
         { label: '写入', value: diskIoRates.write, unit: 'B/s' },
         ...(diskTemperature !== undefined ? [{ label: '温度', value: diskTemperature, unit: '°C' }] : [])
       ]
-    },
-    network: net ? {
-      available: true,
-      value: net.rx_sec + net.tx_sec,
-      unit: 'B/s',
-      extras: [{ label: '下载', value: net.rx_sec, unit: 'B/s' }, { label: '上传', value: net.tx_sec, unit: 'B/s' }]
-    } : { available: false, reason: '未检测到网络接口' }
+    }
   }
 }

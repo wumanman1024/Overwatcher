@@ -13,6 +13,7 @@ import { collectBaseMetrics } from './collectors/base'
 import { MetricSampler } from './collectors/sampler'
 import { collectGpuMetricsWithBackoff } from './collectors/nvidia'
 import { collectLinuxTemperature } from './collectors/linux-temperature'
+import { collectNetworkMetric } from './collectors/network'
 import { collectPlatformTelemetry } from './collectors/platform-telemetry'
 import { collectHardwareProfile } from './collectors/hardware-profile'
 import { placeAtRightCenter } from './window-placement'
@@ -915,7 +916,7 @@ app.whenReady().then(() => {
   }
   tray.on('click', openToolbox)
   tray.on('double-click', openToolbox)
-  const sampler = new MetricSampler([collectBaseMetrics, collectGpuMetricsWithBackoff, collectLinuxTemperature, collectPlatformTelemetry])
+  const sampler = new MetricSampler([collectBaseMetrics, collectNetworkMetric, collectGpuMetricsWithBackoff, collectLinuxTemperature, collectPlatformTelemetry])
   // 采集一次并推给悬浮球、监控中心与趋势窗；与循环调度分开，是为了让内存整理完能立刻补推一次，
   // 否则球上的水波最多还要再等一秒才落下来。
   const publishSnapshot = async (): Promise<void> => {
