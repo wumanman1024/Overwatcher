@@ -15,6 +15,7 @@ import { collectGpuMetricsWithBackoff } from './collectors/nvidia'
 import { collectLinuxTemperature } from './collectors/linux-temperature'
 import { collectPlatformTelemetry } from './collectors/platform-telemetry'
 import { collectHardwareProfile } from './collectors/hardware-profile'
+import { configureWindowsPowerShellEnvironment } from './collectors/windows-powershell'
 import { placeAtRightCenter } from './window-placement'
 // import { formatStatusText } from './status-text'
 import { loadOverlayPreferences, saveOverlayPreferences } from './overlay-store'
@@ -24,6 +25,7 @@ import { installMainErrorLogging } from './runtime-errors'
 import { registerLlmIpc } from './llm-bridge'
 import { deleteModel, listModels, saveModel, setDefaultModel } from './model-store'
 
+configureWindowsPowerShellEnvironment()
 installMainErrorLogging()
 let tray: Tray | undefined
 if (!ensureSingleInstance(app)) {

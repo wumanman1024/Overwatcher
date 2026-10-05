@@ -1,6 +1,7 @@
 import si from 'systeminformation'
 import type { CollectorResult } from './sampler'
 import { createCache } from './cache'
+import { collectWindowsDiskIoRates, type DiskIoRates } from './windows-disk'
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -13,8 +14,12 @@ export function calculateMemoryUsage(memory: { total: number; available: number 
   return ((memory.total - memory.available) / memory.total) * 100
 }
 
-export function getDiskIoRates(disks: { rIO_sec?: number | null; wIO_sec?: number | null } | null | undefined): { read: number; write: number } {
-  return { read: disks?.rIO_sec ?? 0, write: disks?.wIO_sec ?? 0 }
+export function getDiskIoRates(disks: { rIO_sec?: number | null; wIO_sec?: number | null } | null | undefined): DiskIoRates | undefined {
+  const read = disks?.rIO_sec
+  const write = disks?.wIO_sec
+  return typeof read === 'number' && Number.isFinite(read) && typeof write === 'number' && Number.isFinite(write)
+    ? { read, write }
+    : undefined
 }
 
 /*
@@ -26,22 +31,32 @@ const filesystemsCache = createCache(() => si.fsSize().catch(() => []), { ttlMs:
 const diskLayoutCache = createCache(() => si.diskLayout().catch(() => []), { ttlMs: 60_000 })
 const cpuInfoCache = createCache(() => si.cpu(), { ttlMs: 60_000 })
 const cpuTemperatureCache = createCache(() => si.cpuTemperature().catch(() => ({ main: -1 } as Awaited<ReturnType<typeof si.cpuTemperature>>)), { ttlMs: 5_000 })
-const diskIoCache = createCache(() => si.disksIO().catch(() => null), { ttlMs: 3_000 })
+const diskIoCache = createCache(async () => process.platform === 'win32'
+  ? collectWindowsDiskIoRates()
+  : getDiskIoRates(await si.disksIO().catch(() => null)), { ttlMs: 3_000 })
+const defaultNetworkInterfaceCache = createCache(() => si.networkInterfaceDefault().catch(() => ''), { ttlMs: 30_000 })
 
 export async function collectBaseMetrics(): Promise<CollectorResult> {
-  const [load, memory, network, disks, filesystems, cpu, temperature, diskDevices] = await Promise.all([
-    si.currentLoad(), si.mem(), si.networkStats(), diskIoCache(), filesystemsCache(), cpuInfoCache(), cpuTemperatureCache(), diskLayoutCache()
+  const [load, memory, network, defaultNetworkInterface, diskIoRates, filesystems, cpu, cpuCurrentSpeed, temperature, diskDevices] = await Promise.all([
+    si.currentLoad(), si.mem(), si.networkStats(), defaultNetworkInterfaceCache(), diskIoCache(), filesystemsCache(), cpuInfoCache(),
+    si.cpuCurrentSpeed().catch(() => undefined), cpuTemperatureCache(), diskLayoutCache()
   ])
-  const net = network[0]
-  const diskIoRates = getDiskIoRates(disks)
+  const usableNetworks = network.filter((item) =>
+    !['down', 'offline'].includes(item.operstate?.toLowerCase() ?? '') && Number.isFinite(item.rx_sec) && Number.isFinite(item.tx_sec)
+  )
+  const net = usableNetworks.find((item) => item.iface.toLowerCase() === defaultNetworkInterface.toLowerCase())
+    ?? usableNetworks.sort((a, b) => (b.rx_sec + b.tx_sec) - (a.rx_sec + a.tx_sec))[0]
   const diskSize = filesystems.reduce((total, filesystem) => total + filesystem.size, 0)
   const diskUsed = filesystems.reduce((total, filesystem) => total + filesystem.used, 0)
   const diskTemperatures = diskDevices
     .map((disk) => disk.temperature)
     .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0)
   const diskTemperature = diskTemperatures.length > 0 ? Math.round(Math.max(...diskTemperatures)) : undefined
+  const cpuFrequency = typeof cpuCurrentSpeed?.avg === 'number' && Number.isFinite(cpuCurrentSpeed.avg) && cpuCurrentSpeed.avg > 0
+    ? cpuCurrentSpeed.avg
+    : undefined
   const cpuExtras = [
-    { label: '频率', value: `${cpu.speed.toFixed(2)} GHz` },
+    ...(cpuFrequency !== undefined ? [{ label: '频率', value: cpuFrequency, unit: 'GHz' }] : []),
     { label: '核心', value: `${cpu.cores} 核 / ${cpu.physicalCores} 线程` },
     ...(temperature.main > 0 ? [{ label: '温度', value: `${Math.round(temperature.main)}°C` }] : [])
   ]
@@ -60,8 +75,7 @@ export async function collectBaseMetrics(): Promise<CollectorResult> {
       extras: [
         { label: '已用', value: diskUsed, unit: 'B' },
         { label: '总量', value: diskSize, unit: 'B' },
-        { label: '读取', value: diskIoRates.read, unit: 'B/s' },
-        { label: '写入', value: diskIoRates.write, unit: 'B/s' },
+        ...(diskIoRates ? [{ label: '读取', value: diskIoRates.read, unit: 'B/s' }, { label: '写入', value: diskIoRates.write, unit: 'B/s' }] : []),
         ...(diskTemperature !== undefined ? [{ label: '温度', value: diskTemperature, unit: '°C' }] : [])
       ]
     },
@@ -70,6 +84,6 @@ export async function collectBaseMetrics(): Promise<CollectorResult> {
       value: net.rx_sec + net.tx_sec,
       unit: 'B/s',
       extras: [{ label: '下载', value: net.rx_sec, unit: 'B/s' }, { label: '上传', value: net.tx_sec, unit: 'B/s' }]
-    } : { available: false, reason: '未检测到网络接口' }
+    } : { available: false, reason: '未检测到可用网络接口速率' }
   }
 }

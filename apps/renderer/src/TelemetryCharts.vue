@@ -11,7 +11,7 @@ import { healthForValue } from './metric-health'
 
 use([SVGRenderer, LineChart, GridComponent, LegendComponent, TooltipComponent])
 const props = defineProps<{ history: TelemetrySample[] }>()
-const trend = ref<'usage' | 'thermal' | 'network' | 'power'>('usage')
+const trend = ref<'usage' | 'thermal' | 'frequency' | 'network' | 'power'>('usage')
 const latest = computed(() => props.history.at(-1))
 const historyWindow = computed(() => formatHistoryWindow(props.history))
 const utilizationItems = computed(() => toUtilizationItems({ cpu: latest.value?.cpu ?? 0, gpu: latest.value?.gpu ?? 0, memory: latest.value?.memory ?? 0 }).map((item) => ({
@@ -23,6 +23,7 @@ const values = (key: Exclude<keyof TelemetrySample, 'timestamp'>) => toTrendSeri
 const trendDefinitions = computed(() => ({
   usage: { unit: '%', series: [{ name: 'CPU', key: 'cpu', color: '#19b968' }, { name: 'GPU', key: 'gpu', color: '#42a5f5' }, { name: '内存', key: 'memory', color: '#ed7c3a' }] },
   thermal: { unit: '°C', series: [{ name: 'CPU 温度', key: 'cpuTemperature', color: '#ed7c3a' }, { name: 'GPU 温度', key: 'gpuTemperature', color: '#d85d3a' }] },
+  frequency: { unit: 'GHz', series: [{ name: 'CPU 频率', key: 'cpuFrequency', color: '#8167e7' }] },
   network: { unit: 'B/s', series: [{ name: '下载', key: 'networkDown', color: '#19b968' }, { name: '上传', key: 'networkUp', color: '#ed7c3a' }] },
   power: { unit: 'W', series: [{ name: '电池功率', key: 'batteryPower', color: '#42b883' }] }
 }))
@@ -44,7 +45,7 @@ const chartOption = computed(() => {
   <section class="telemetry-charts" aria-label="实时趋势">
     <div class="chart-section-heading"><div><span>核心负载</span><small>CORE UTILIZATION</small></div><span class="live-state"><i></i>实时更新</span></div>
     <div class="utilization-strip" aria-label="CPU、GPU 与内存占用"><article v-for="item in utilizationItems" :key="item.key" class="utilization-item" :class="[`status-${item.health}`, `${item.key}-utilization`]"><div class="utilization-copy"><strong>{{ item.label }}</strong><small>{{ item.caption }}</small></div><span class="utilization-value">{{ item.value }}<small>%</small></span><span class="utilization-track" role="progressbar" :aria-label="`${item.label} 占用`" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="item.value"><i :style="{ width: `${item.value}%` }"></i></span></article></div>
-    <div class="trend-heading"><div><span>趋势分析</span><small>{{ historyWindow }}</small></div><div class="chart-tabs" role="tablist" aria-label="趋势指标"><button v-for="(_, key) in trendDefinitions" :key="key" :class="{ active: trend === key }" type="button" role="tab" :aria-selected="trend === key" @click="trend = key">{{ { usage: '占用', thermal: '温度', network: '网络', power: '功率' }[key] }}</button></div></div>
+    <div class="trend-heading"><div><span>趋势分析</span><small>{{ historyWindow }}</small></div><div class="chart-tabs" role="tablist" aria-label="趋势指标"><button v-for="(_, key) in trendDefinitions" :key="key" :class="{ active: trend === key }" type="button" role="tab" :aria-selected="trend === key" @click="trend = key">{{ { usage: '占用', thermal: '温度', frequency: '频率', network: '网络', power: '功率' }[key] }}</button></div></div>
     <VChart class="trend-chart" :option="chartOption" :init-options="{ renderer: 'svg' }" autoresize aria-label="实时趋势图" />
   </section>
 </template>
