@@ -5,7 +5,7 @@ import ToolboxPage from '../ToolboxPage.vue'
 import SvgIcon from '../components/SvgIcon.vue'
 
 type ToolCategory = 'all' | 'file' | 'data' | 'agent' | 'design' | 'network'
-type ToolView = 'cleanup' | 'json' | 'data-lab' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image-compress' | 'image-crop' | 'background-remove' | 'screen-color' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'ports' | 'volta' | 'nvm' | 'assistant-prompt' | 'menu-sql'
+type ToolView = 'model-viewer' | 'cleanup' | 'json' | 'data-lab' | 'stats' | 'radix' | 'bytes' | 'crypto' | 'diff' | 'convert' | 'color' | 'image-compress' | 'image-crop' | 'background-remove' | 'screen-color' | 'qrcode' | 'ip-check' | 'network-diagnosis' | 'ports' | 'volta' | 'nvm' | 'assistant-prompt' | 'menu-sql'
 const route = useRoute()
 const router = useRouter()
 const savedCategory = localStorage.getItem('localforge:default-category')
@@ -21,6 +21,7 @@ const portalTools: Array<{ id: ToolView; category: Exclude<ToolCategory, 'all'>;
   { id: 'crypto', category: 'data', title: '加解密工作台', description: 'MD5、SHA-256、AES 与国密 SM2、SM3、SM4。', state: '数据工具' },
   { id: 'diff', category: 'data', title: '文本差异对比', description: '逐行比较两段文本，快速查看新增、删除和未变内容。', state: '数据工具' },
   { id: 'convert', category: 'data', title: '配置格式转换', description: '在 JSON、YAML、TOML 与 XML 之间本地转换。', state: '数据工具' },
+  { id: 'model-viewer', category: 'design', title: '3D 模型查看器', description: '打开模型、点云与高斯泼溅，支持拖拽和视角控制。', state: '设计工具' },
   { id: 'color', category: 'design', title: '颜色转换器', description: '在 HEX、RGB 与 HSL 之间转换，并一键复制颜色值。', state: '设计工具' },
   { id: 'image-compress', category: 'design', title: '本地图片压缩', description: '批量压缩图片、统一转换格式并导出至新文件夹。', state: '设计工具' },
   { id: 'image-crop', category: 'design', title: '图片裁剪', description: '按像素精确裁剪本地图片，并下载裁剪结果。', state: '设计工具' },

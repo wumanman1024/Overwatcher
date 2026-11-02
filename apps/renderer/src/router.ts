@@ -1,5 +1,6 @@
 import { createMemoryHistory, createRouter } from 'vue-router'
 import PortalTool from './tools/PortalTool.vue'
+import ModelViewerTool from './tools/ModelViewerTool.vue'
 import CleanupTool from './tools/CleanupTool.vue'
 import JsonTool from './tools/JsonTool.vue'
 import DataLabTool from './tools/DataLabTool.vue'
@@ -27,6 +28,7 @@ export const router = createRouter({
   history: createMemoryHistory(),
   routes: [
     { path: '/', name: 'portal', component: PortalTool },
+    { path: '/model-viewer', name: 'model-viewer', component: ModelViewerTool },
     { path: '/cleanup', name: 'cleanup', component: CleanupTool },
     { path: '/json', name: 'json', component: JsonTool },
     { path: '/data-lab', name: 'data-lab', component: DataLabTool },
