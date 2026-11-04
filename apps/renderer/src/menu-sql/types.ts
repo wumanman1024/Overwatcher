@@ -3,6 +3,8 @@ export type MenuType = 'M' | 'C' | 'F'
 /** 一条 sys_menu 记录；localId 只用于生成 SQL 时串联父子关系，不入库。 */
 export interface MenuNode {
   localId: string
+  /** 用字符串保存 64 位雪花 ID，避免 JavaScript 数字精度丢失。 */
+  menuId: string
   menuType: MenuType
   menuName: string
   orderNum: number
@@ -27,9 +29,6 @@ export interface SqlOptions {
   roleKeys: string
   /** 生成范围：整棵树或仅当前节点及其子树。 */
   scope: 'all' | 'branch'
-  /** sys_menu.menu_id 非自增时手工指定起始 ID。 */
-  manualIds: boolean
-  manualStartId: number
 }
 
 export type IssueLevel = 'error' | 'warning'

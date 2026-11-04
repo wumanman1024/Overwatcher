@@ -8,18 +8,17 @@ const TYPE_TAG: Record<MenuNode['menuType'], string> = { M: '目录', C: '菜单
 /** 只导出分支时，分支根的上级不在脚本内，用它占位并由脚本头部提示替换。 */
 const BRANCH_PARENT_PLACEHOLDER = '@parent_menu_id'
 
-/** 一行待生成的菜单，附带引用它时使用的 SQL 表达式（会话变量或字面量 ID）。 */
+/** 一行待生成的菜单及其雪花 ID。 */
 interface PlannedRow { node: MenuNode; parents: MenuNode[]; ref: string }
 
 /**
  * 深度优先展开成线性 INSERT 序列。父节点必然先于子节点出现，
- * 因此自增模式下 parent_id 可直接引用父节点的 LAST_INSERT_ID() 变量；
- * 手工 ID 模式下父子共用同一套连续编号，起始值由用户指定。
+ * 父节点和角色授权都引用节点上保存的雪花 ID。
  */
-function planRows(roots: MenuNode[], manualIds: boolean, startId: number): PlannedRow[] {
+function planRows(roots: MenuNode[]): PlannedRow[] {
   const rows: PlannedRow[] = []
   walkNodes(roots, (node, parents) => {
-    rows.push({ node, parents, ref: manualIds ? String(startId + rows.length) : `@m${rows.length + 1}` })
+    rows.push({ node, parents, ref: node.menuId })
   })
   return rows
 }
@@ -37,9 +36,9 @@ const OPTIONAL_FIELDS: Array<{ column: string; read: (node: MenuNode) => string 
   { column: 'remark', read: (node) => node.remark }
 ]
 
-function insertStatement(node: MenuNode, parentRef: string, manualId: string | null): string {
+function insertStatement(node: MenuNode, parentRef: string, menuId: string): string {
   const pairs: Array<[string, string]> = []
-  if (manualId) pairs.push(['menu_id', manualId])
+  pairs.push(['menu_id', menuId])
   pairs.push(
     ['menu_name', sqlValue(node.menuName)],
     ['parent_id', parentRef],
@@ -77,8 +76,7 @@ function parentRefFor(rows: PlannedRow[], row: PlannedRow, isBranchRoot: boolean
 export function generateSql(roots: MenuNode[], options: SqlOptions, selectedLocalId?: string): string {
   const branchMode = options.scope === 'branch' && !!selectedLocalId
   const scoped = branchMode ? branchOf(roots, selectedLocalId as string) : roots
-  const manualIds = options.manualIds
-  const rows = planRows(scoped, manualIds, Math.max(1, Math.trunc(options.manualStartId) || 1))
+  const rows = planRows(scoped)
   const roleKeys = [...new Set(options.roleKeys.split(',').map((value) => value.trim()).filter(Boolean))]
   const countOf = (type: MenuNode['menuType']) => rows.filter((row) => row.node.menuType === type).length
   // branchOf 会把选中节点变成新根、丢掉它的祖先链，因此父级名称要回到完整树里查。
@@ -87,9 +85,7 @@ export function generateSql(roots: MenuNode[], options: SqlOptions, selectedLoca
   const lines: string[] = [
     '-- 由 LocalForge「菜单 SQL 生成器」导出',
     `-- 节点：${rows.length}（目录 ${countOf('M')} / 菜单 ${countOf('C')} / 按钮 ${countOf('F')}）${branchMode ? ' · 仅选中分支' : ''}`,
-    manualIds
-      ? `-- 主键：手工指定 menu_id，自 ${rows[0]?.ref ?? '-'} 起按深度优先顺序连续编号；执行前请确认与现网既有 ID 不冲突`
-      : '-- 主键：依赖 sys_menu.menu_id 自增；父子关系用 LAST_INSERT_ID() 会话变量串联，换库执行无需改动',
+    '-- 主键：已生成雪花 menu_id；父子关系及角色授权使用相同 ID',
     '',
     'SET NAMES utf8mb4;'
   ]
@@ -106,8 +102,7 @@ export function generateSql(roots: MenuNode[], options: SqlOptions, selectedLoca
 
   rows.forEach((row, index) => {
     lines.push(commentFor(row.node))
-    lines.push(insertStatement(row.node, parentRefFor(rows, row, index === 0 && !!branchParent), manualIds ? row.ref : null))
-    if (!manualIds) lines.push(`SET ${row.ref} := LAST_INSERT_ID();`)
+    lines.push(insertStatement(row.node, parentRefFor(rows, row, index === 0 && !!branchParent), row.ref))
     if (index < rows.length - 1) lines.push('')
   })
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ToolboxPage from '../ToolboxPage.vue'
 import SvgIcon from '../components/SvgIcon.vue'
@@ -41,17 +41,24 @@ const activeCategory = computed<ToolCategory>(() => {
   return category === 'file' || category === 'data' || category === 'agent' || category === 'network' || category === 'design' || category === 'all' ? category : initialCategory
 })
 const portalTitle = computed(() => categories.find((category) => category.id === activeCategory.value)?.label ?? '全部工具')
-const visiblePortalTools = computed(() => activeCategory.value === 'all' ? portalTools : portalTools.filter((tool) => tool.category === activeCategory.value))
+const searchQuery = ref('')
+const visiblePortalTools = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  return portalTools.filter((tool) =>
+    (activeCategory.value === 'all' || tool.category === activeCategory.value) &&
+    (!query || `${tool.title} ${tool.description} ${tool.state} ${tool.id}`.toLowerCase().includes(query))
+  )
+})
 const openTool = (tool: ToolView) => router.push({ name: tool })
 </script>
 
 <template><ToolboxPage>
-  <header class="toolbox-heading"><p>LOCALFORGE / TOOL PORTAL</p><h2>{{ portalTitle }}</h2><span>选择一项工具开始工作；本地工具不上传内容，联网工具会明确说明用途。</span></header>
+  <header class="toolbox-heading portal-heading"><div><p>LOCALFORGE / TOOL PORTAL</p><h2>{{ portalTitle }}</h2><span>选择一项工具开始工作；本地工具不上传内容，联网工具会明确说明用途。</span></div><label class="portal-search"><span class="visually-hidden">搜索当前分类的工具</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/></svg><input v-model="searchQuery" type="search" placeholder="搜索工具名称或功能" /></label></header>
   <section class="portal-list" :aria-label="`${portalTitle}列表`">
     <button v-for="tool in visiblePortalTools" :key="tool.id" class="portal-item" type="button" @click="openTool(tool.id)">
-      <i class="portal-icon" :class="`portal-icon-${tool.id}`"><SvgIcon :name="tool.id === 'cleanup' ? 'trash' : tool.id === 'menu-sql' ? 'menu-tree' : tool.category === 'data' ? 'code' : tool.id === 'color' || tool.id === 'screen-color' ? 'palette' : tool.category === 'design' ? 'image' : tool.id === 'ports' ? 'monitor' : 'globe'" /></i>
+      <i class="portal-icon" :class="[`portal-icon-${tool.id}`, `portal-category-${tool.category}`]"><SvgIcon :name="`tool-${tool.id}`" /></i>
       <span class="portal-copy"><em>{{ tool.state }}</em><strong>{{ tool.title }}</strong><small>{{ tool.description }}</small></span><b>›</b>
     </button>
-    <p v-if="!visiblePortalTools.length" class="portal-empty">该分类暂时没有可用工具。</p>
+    <p v-if="!visiblePortalTools.length" class="portal-empty" role="status">{{ searchQuery.trim() ? '没有找到匹配的工具，请尝试其他关键词。' : '该分类暂时没有可用工具。' }}</p>
   </section>
 </ToolboxPage></template>

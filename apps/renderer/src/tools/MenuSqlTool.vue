@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import ToolboxPage from '../ToolboxPage.vue'
@@ -20,7 +20,7 @@ const { models, activeModel, setActive, ready: modelsReady, loadError: modelsErr
 const menuTree = ref<MenuNode[]>([])
 const selectedId = ref('')
 const collapsed = ref<Set<string>>(new Set())
-const sqlOptions = reactive<SqlOptions>({ roleKeys: '', scope: 'all', manualIds: false, manualStartId: 1 })
+const sqlOptions = reactive<SqlOptions>({ roleKeys: '', scope: 'all' })
 const message = ref('粘贴中文菜单树，一键生成 sys_menu 的 MySQL 脚本；内容只保存在本机。')
 const fileName = ref('sys_menu.sql')
 const draftFileInput = ref<HTMLInputElement>()
@@ -38,13 +38,63 @@ const PASTE_PLACEHOLDER = `- 系统管理
   - 缓存监控`
 
 const sourceText = ref('')
+type SourceRow = { id: string; name: string; depth: number }
+const SOURCE_FORM_KEY = 'localforge:menu-sql-source-form'
+const SOURCE_MODE_KEY = 'localforge:menu-sql-source-mode'
+const sourceMode = ref<'form' | 'text'>('form')
+const sourceRows = ref<SourceRow[]>([])
+let sourceRowSeed = 0
+const newSourceRow = (depth: number, name = ''): SourceRow => ({ id: `source-${sourceRowSeed++}`, depth, name })
+const sourceFormIncomplete = computed(() => sourceRows.value.some((row) => !row.name.trim()))
+const sourceFormText = () => sourceRows.value.map((row) => `${'  '.repeat(row.depth)}- ${row.name.trim()}`).join('\n')
+const rowsFromText = (text: string): SourceRow[] => parseMenuText(text).map((line) => newSourceRow(line.depth, line.name))
+const focusSourceRow = (id: string) => nextTick(() => document.getElementById(id)?.focus())
+
+function switchSourceMode(mode: 'form' | 'text') {
+  if (mode === sourceMode.value) return
+  if (mode === 'text' && sourceFormIncomplete.value) {
+    message.value = '请先填写或删除空白菜单，再切换到文本输入。'
+    return
+  }
+  if (mode === 'form') sourceRows.value = rowsFromText(sourceText.value)
+  else sourceText.value = sourceFormText()
+  sourceMode.value = mode
+}
+
+function addSourceRow(index?: number, child = false) {
+  if (index === undefined) {
+    const row = newSourceRow(0)
+    sourceRows.value.push(row)
+    void focusSourceRow(row.id)
+    return
+  }
+  const current = sourceRows.value[index]
+  let insertion = index + 1
+  while (insertion < sourceRows.value.length && sourceRows.value[insertion].depth > current.depth) insertion++
+  const row = newSourceRow(current.depth + (child ? 1 : 0))
+  sourceRows.value.splice(insertion, 0, row)
+  void focusSourceRow(row.id)
+}
+
+function removeSourceRow(index: number) {
+  const row = sourceRows.value[index]
+  let end = index + 1
+  while (end < sourceRows.value.length && sourceRows.value[end].depth > row.depth) end++
+  if (end > index + 1 && !window.confirm(`删除「${row.name || '未命名菜单'}」及其 ${end - index - 1} 个下级菜单？`)) return
+  sourceRows.value.splice(index, end - index)
+}
 const generating = ref(false)
+interface RunLog { time: string; text: string; detail?: string; error?: boolean }
+const runLogs = ref<RunLog[]>([])
+const logRun = (text: string, detail?: string, error = false) => {
+  runLogs.value.push({ time: new Date().toLocaleTimeString('zh-CN', { hour12: false }), text, detail, error })
+}
 /** 上一次生成时的微调区快照，用于判断用户是否手动改过、重新生成前要不要确认。 */
 let lastGeneratedJson = ''
 
-const parsedLines = computed(() => parseMenuText(sourceText.value))
+const parsedLines = computed(() => parseMenuText(sourceMode.value === 'form' && !sourceFormIncomplete.value ? sourceFormText() : sourceText.value))
 const parsedStat = computed(() => countByDepth(parsedLines.value))
-const hasSource = computed(() => parsedStat.value.total > 0)
+const hasSource = computed(() => parsedStat.value.total > 0 && (sourceMode.value !== 'form' || !sourceFormIncomplete.value))
 
 async function generate() {
   if (!hasSource.value) { message.value = '先粘贴菜单树再生成。'; return }
@@ -53,28 +103,41 @@ async function generate() {
   if (!config) { message.value = '尚未配置模型，请先点左下角「模型管理」添加。'; return }
   if (hasTree.value && JSON.stringify(menuTree.value) !== lastGeneratedJson && !window.confirm('微调区里的改动会被生成结果覆盖，继续吗？')) return
 
+  const lines = parsedLines.value.map((line) => ({ ...line }))
+  const messages: Array<{ role: 'system' | 'user'; content: string }> = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: buildUserPrompt(lines) }
+  ]
+  const startedAt = Date.now()
   generating.value = true
-  generateProgress.value = `正在请求 ${config.name} 为 ${parsedStat.value.total} 个节点命名…`
+  message.value = `正在请求 ${config.name} 为 ${lines.length} 个节点命名…`
   try {
+    const serviceUrl = new URL(config.baseUrl)
+    const endpoint = `${serviceUrl.origin}${serviceUrl.pathname.replace(/\/+$/, '')}/chat/completions`
+    logRun(`开始请求模型 ${config.name}（${config.modelId}），共 ${lines.length} 个节点。`, JSON.stringify({ endpoint, model: config.modelId, temperature: config.temperature, effort: config.effort, maxTokens: config.maxTokens, timeoutMs: config.timeoutMs, messages }, null, 2))
     const result = await window.llmTools.chat({
-      config,
-      messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: buildUserPrompt(parsedLines.value) }]
+      config: { ...config },
+      messages
     })
-    const outcome = buildTree(parsedLines.value, result.content)
+    logRun(`已收到模型响应（${((Date.now() - startedAt) / 1000).toFixed(1)} 秒${result.finishReason ? `，结束原因：${result.finishReason}` : ''}），正在解析。`, result.content)
+    const outcome = buildTree(lines, result.content)
     menuTree.value = outcome.tree
     selectedId.value = outcome.tree[0]?.children[0]?.localId ?? outcome.tree[0]?.localId ?? ''
     collapsed.value = new Set()
     lastGeneratedJson = JSON.stringify(menuTree.value)
     const summary = summarize(validateMenuTree(menuTree.value))
     message.value = outcome.notes.length
-      ? `已生成 ${parsedStat.value.total} 个节点。${outcome.notes.join(' ')}`
-      : `已生成 ${parsedStat.value.total} 个节点，${summary.errors ? `${summary.errors} 个错误待修正` : '校验通过'}。`
+      ? `已生成 ${lines.length} 个节点。${outcome.notes.join(' ')}`
+      : `已生成 ${lines.length} 个节点，${summary.errors ? `${summary.errors} 个错误待修正` : '校验通过'}。`
+    logRun(message.value)
     ElMessage.success({ message: '菜单 SQL 已生成', duration: 1_600 })
   } catch (error) {
-    message.value = `生成失败：${error instanceof Error ? error.message : String(error)}`
+    const errorText = error instanceof Error ? error.message : String(error)
+    const safeError = config.apiKey ? errorText.split(config.apiKey).join('[已隐藏密钥]') : errorText
+    message.value = `生成失败：${safeError}`
+    logRun(message.value, undefined, true)
   } finally {
     generating.value = false
-    generateProgress.value = ''
   }
 }
 
@@ -233,10 +296,11 @@ const loadSample = () => {
 }
 
 const clearAll = () => {
-  const hadAnything = hasTree.value || !!sourceText.value
+  const hadAnything = hasTree.value || !!sourceText.value || sourceRows.value.length > 0
   if (hadAnything && !window.confirm('清空粘贴的菜单树与已生成的节点？')) return
   menuTree.value = []
   sourceText.value = ''
+  sourceRows.value = []
   lastGeneratedJson = ''
   selectedId.value = ''
   message.value = '已清空。'
@@ -264,17 +328,19 @@ const importJson = async (event: Event) => {
 
 const MENU_TEXT_FIELDS = ['menuName', 'path', 'component', 'query', 'routeName', 'perms', 'icon', 'redirect', 'activeMenu', 'remark'] as const
 const MENU_FLAG_FIELDS = ['isFrame', 'isCache', 'visible', 'status'] as const
-function reviveTree(raw: unknown[]): MenuNode[] {
+function reviveTree(raw: unknown[], usedIds = new Set<string>()): MenuNode[] {
   return raw.map((item) => {
     const value = (item ?? {}) as Record<string, unknown>
     const menuType: MenuType = value.menuType === 'M' || value.menuType === 'F' ? value.menuType : 'C'
     const node = createNode(menuType)
+    if (typeof value.menuId === 'string' && /^[1-9]\d{0,18}$/.test(value.menuId) && BigInt(value.menuId) <= 9223372036854775807n && !usedIds.has(value.menuId)) node.menuId = value.menuId
+    usedIds.add(node.menuId)
     const text = (key: typeof MENU_TEXT_FIELDS[number]) => { if (typeof value[key] === 'string') node[key] = value[key] as string }
     const flag = (key: typeof MENU_FLAG_FIELDS[number]) => { node[key] = value[key] === '1' ? '1' : '0' }
     MENU_TEXT_FIELDS.forEach(text)
     MENU_FLAG_FIELDS.forEach(flag)
     node.orderNum = Number.isFinite(Number(value.orderNum)) ? Number(value.orderNum) : 1
-    node.children = Array.isArray(value.children) ? reviveTree(value.children) : []
+    node.children = Array.isArray(value.children) ? reviveTree(value.children, usedIds) : []
     return node
   })
 }
@@ -314,6 +380,20 @@ function download(name: string, content: string, mime: string) {
 onMounted(() => {
   try {
     sourceText.value = localStorage.getItem(DRAFT_SOURCE_KEY) ?? ''
+    sourceMode.value = localStorage.getItem(SOURCE_MODE_KEY) === 'text' ? 'text' : 'form'
+    const savedRows = localStorage.getItem(SOURCE_FORM_KEY)
+    if (sourceMode.value === 'form' && savedRows) {
+      const rows: unknown = JSON.parse(savedRows)
+      if (Array.isArray(rows)) {
+        let previousDepth = -1
+        sourceRows.value = rows.map((row) => {
+          const value = (row ?? {}) as Partial<SourceRow>
+          const depth = Math.max(0, Math.min(Number.isInteger(value.depth) ? value.depth! : 0, previousDepth + 1, 30))
+          previousDepth = depth
+          return newSourceRow(depth, typeof value.name === 'string' ? value.name : '')
+        })
+      } else sourceRows.value = rowsFromText(sourceText.value)
+    } else sourceRows.value = rowsFromText(sourceText.value)
     const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
     if (raw) {
       menuTree.value = reviveTree(JSON.parse(raw))
@@ -332,6 +412,11 @@ watch(menuTree, (tree) => {
   draftTimer = setTimeout(() => localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(tree)), 500)
 }, { deep: true })
 watch(sourceText, (text) => localStorage.setItem(DRAFT_SOURCE_KEY, text))
+watch(sourceRows, (rows) => {
+  localStorage.setItem(SOURCE_FORM_KEY, JSON.stringify(rows))
+  if (sourceMode.value === 'form' && !sourceFormIncomplete.value) sourceText.value = sourceFormText()
+}, { deep: true })
+watch(sourceMode, (mode) => localStorage.setItem(SOURCE_MODE_KEY, mode))
 watch(sqlOptions, (options) => localStorage.setItem(DRAFT_OPTIONS_KEY, JSON.stringify(options)), { deep: true })
 onBeforeUnmount(() => clearTimeout(draftTimer))
 
@@ -344,16 +429,32 @@ const typeModel = computed({
 <template>
   <ToolboxPage>
     <header class="toolbox-heading">
-      <div><p>智能体 / 菜单 SQL</p><h2>菜单管理 SQL 生成器</h2><span>粘贴中文菜单树，由大模型自动译出英文标识并生成 sys_menu 的 MySQL 脚本；数据只存在本机。</span></div>
+      <div><p>智能体 / 菜单 SQL</p><h2>菜单管理 SQL 生成器</h2><span>填写或粘贴中文菜单，由大模型译出英文标识并生成 sys_menu 的 MySQL 脚本。</span></div>
       <button class="back-button" @click="backToPortal">‹ 返回工具列表</button>
     </header>
 
     <section class="menu-paste">
       <div class="menu-paste-head">
         <strong>菜单结构</strong>
-        <small>支持 markdown 缩进列表，缩进用空格或 Tab，# 开头为注释</small>
+        <small>{{ sourceMode === 'form' ? '添加同级或下级菜单，自动维护层级' : '支持 Markdown 缩进列表，# 开头为注释' }}</small>
       </div>
-      <textarea v-model="sourceText" class="menu-source" spellcheck="false" :placeholder="PASTE_PLACEHOLDER"></textarea>
+      <div class="menu-source-tabs" role="group" aria-label="菜单输入方式">
+        <button type="button" :class="{ active: sourceMode === 'form' }" :aria-pressed="sourceMode === 'form'" @click="switchSourceMode('form')">层级表单</button>
+        <button type="button" :class="{ active: sourceMode === 'text' }" :aria-pressed="sourceMode === 'text'" @click="switchSourceMode('text')">文本输入</button>
+      </div>
+      <div v-if="sourceMode === 'form'" class="menu-source-form">
+        <p v-if="!sourceRows.length" class="menu-source-empty">从一级菜单开始，逐层添加下级菜单。</p>
+        <div v-for="(row, index) in sourceRows" :key="row.id" class="menu-source-row" :style="{ '--menu-depth': Math.min(row.depth, 8) }">
+          <span class="menu-source-level">{{ row.depth + 1 }} 级</span>
+          <input :id="row.id" v-model="row.name" :aria-label="`第 ${index + 1} 项菜单名称，${row.depth + 1} 级`" placeholder="输入菜单名称" maxlength="200" @keydown.enter.prevent="addSourceRow(index)" />
+          <button type="button" @click="addSourceRow(index)">同级</button>
+          <button type="button" :disabled="row.depth >= 30" @click="addSourceRow(index, true)">下级</button>
+          <button type="button" class="danger" :aria-label="`删除${row.name || '未命名菜单'}`" @click="removeSourceRow(index)">删除</button>
+        </div>
+        <button type="button" class="menu-source-add" @click="addSourceRow()">＋ 添加一级菜单</button>
+        <p v-if="sourceFormIncomplete" class="menu-source-hint" role="status">请填写所有菜单名称，或删除空白项后生成。</p>
+      </div>
+      <textarea v-else v-model="sourceText" class="menu-source" spellcheck="false" :placeholder="PASTE_PLACEHOLDER"></textarea>
 
       <div class="menu-generate">
         <label class="menu-model-pick">使用模型
@@ -368,12 +469,23 @@ const typeModel = computed({
         <button :disabled="!hasSource || generating" @click="generateOffline">离线生成</button>
         <button @click="draftFileInput?.click()">导入 JSON</button>
         <button :disabled="!hasTree" @click="exportJson">导出 JSON</button>
-        <button class="danger" :disabled="!hasTree && !sourceText" @click="clearAll">清空</button>
+        <button class="danger" :disabled="!hasTree && !sourceText && !sourceRows.length" @click="clearAll">清空</button>
         <input ref="draftFileInput" class="visually-hidden" type="file" accept="application/json,.json" @change="importJson" />
       </div>
       <p v-if="modelsError" class="tool-message error">{{ modelsError }}</p>
       <p v-else-if="!modelsReady" class="tool-message">正在读取模型配置…</p>
       <p v-else-if="!models.length" class="tool-message">尚未配置模型：点左下角「模型管理」添加一个 OpenAI 兼容服务后即可一键生成。</p>
+    </section>
+
+    <section class="menu-run-log" aria-label="运行日志">
+      <header><div><strong>运行日志</strong><span>{{ generating ? '请求进行中…' : '显示本次页面中的请求与响应' }}</span></div><button type="button" :disabled="!runLogs.length || generating" @click="runLogs = []">清空日志</button></header>
+      <p v-if="!runLogs.length" class="menu-log-empty">生成 SQL 后可在这里查看 AI 请求和运行状态。</p>
+      <ol v-else class="menu-log-list" aria-live="polite">
+        <li v-for="(entry, index) in runLogs" :key="index" :class="{ error: entry.error }">
+          <div><time>{{ entry.time }}</time><span>{{ entry.text }}</span></div>
+          <details v-if="entry.detail"><summary>查看{{ entry.text.startsWith('开始请求') ? '请求' : '响应' }}详情</summary><pre>{{ entry.detail }}</pre></details>
+        </li>
+      </ol>
     </section>
 
     <p class="tool-message" :class="{ error: issueSummary.errors > 0 }">
@@ -494,8 +606,6 @@ const typeModel = computed({
         <div class="json-actions">
           <label>范围 <select v-model="sqlOptions.scope"><option value="all">全部</option><option value="branch">选中分支</option></select></label>
           <label class="menu-roles">授权角色<input v-model="sqlOptions.roleKeys" placeholder="admin，逗号分隔" /></label>
-          <label class="menu-manual"><input v-model="sqlOptions.manualIds" type="checkbox" /> 手工指定 ID</label>
-          <label v-if="sqlOptions.manualIds">起始 ID<input v-model.number="sqlOptions.manualStartId" type="number" min="1" /></label>
           <label>文件名<input v-model="fileName" class="menu-filename" placeholder="sys_menu.sql" /></label>
           <button class="primary" @click="copySql">复制 SQL</button>
           <button @click="saveFile">导出 .sql</button>

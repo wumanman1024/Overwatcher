@@ -3,10 +3,26 @@ import type { MenuNode, MenuType } from './types'
 
 let localIdSeed = 0
 const nextLocalId = () => `n${Date.now().toString(36)}${(localIdSeed++).toString(36)}`
+const SNOWFLAKE_EPOCH = 1577836800000n // 2020-01-01 UTC
+const workerId = BigInt(crypto.getRandomValues(new Uint16Array(1))[0] & 1023)
+let lastTimestamp = 0n
+let sequence = 0n
+
+function nextMenuId(): string {
+  let timestamp = BigInt(Date.now())
+  if (timestamp <= lastTimestamp) {
+    timestamp = lastTimestamp
+    sequence += 1n
+    if (sequence > 4095n) { timestamp += 1n; sequence = 0n }
+  } else sequence = 0n
+  lastTimestamp = timestamp
+  return (((timestamp - SNOWFLAKE_EPOCH) << 22n) | (workerId << 12n) | sequence).toString()
+}
 
 export function createNode(menuType: MenuType, overrides: Partial<MenuNode> = {}): MenuNode {
   return {
     localId: nextLocalId(),
+    menuId: nextMenuId(),
     menuType,
     menuName: '',
     orderNum: MENU_DEFAULTS.orderNum,
