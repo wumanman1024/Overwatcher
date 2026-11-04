@@ -88,7 +88,7 @@ const test = async (model: ModelConfig) => {
   testing[model.id] = 'pending'
   testDetail[model.id] = ''
   try {
-    const result = await window.llmTools!.test(model)
+    const result = await window.llmTools!.test({ ...model })
     testing[model.id] = result.ok ? 'ok' : 'fail'
     testDetail[model.id] = result.ok ? (result.count === undefined ? '可访问' : `${result.count} 个模型`) : (result.error || '不可访问')
   } catch (error) {
